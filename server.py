@@ -79,7 +79,43 @@ SERVER_PORT = _cfg_server("port", 18791)
 SERVER_LOG_LEVEL = _cfg_server("log_level", "warning")
 
 
-app = FastAPI(title="Hermes Server Dashboard")
+app = FastAPI(
+    title="Hermes Server Dashboard",
+    description=(
+        "Retro terminal-style monitoring web dashboard for Linux servers, "
+        "Hermes Agent instances, and trading bots. Provides real-time system "
+        "metrics, service management, time-series charts, and a plugin system "
+        "for custom integrations."
+    ),
+    version="2.0.0",
+    contact={
+        "name": "Hermes Server Dashboard",
+        "url": "https://github.com/pantojinho/hermes-server-dashboard",
+    },
+    license_info={"name": "MIT"},
+    openapi_tags=[
+        {
+            "name": "System",
+            "description": "Hardware and OS-level metrics — CPU, memory, disk, network, temperatures, Docker containers, and network connectivity.",
+        },
+        {
+            "name": "Services",
+            "description": "Systemd service monitoring, restart operations, and journalctl log retrieval.",
+        },
+        {
+            "name": "Hermes",
+            "description": "Hermes Agent status — model, provider, platforms, cron jobs, sessions, kanban tasks, and configuration management.",
+        },
+        {
+            "name": "Metrics",
+            "description": "Time-series data (TSDB) — historical chart series, collector status, and aggregated dashboard payloads.",
+        },
+        {
+            "name": "Plugins",
+            "description": "Plugin discovery and tab content retrieval for dashboard extensions.",
+        },
+    ],
+)
 
 # CORS from config
 _cors_cfg = CFG.get("cors", {})
@@ -477,46 +513,32 @@ def get_connections() -> dict:
 
 
 def get_services() -> list[dict]:
-    """Get status of key services."""
+    """Get status of services — driven entirely by config.yaml."""
     services = []
-    # Build from config, with some defaults
     cfg_services = CFG.get("services", [])
     if not cfg_services:
+        # Fallback if config is empty
         cfg_services = [
-            {"name": "hermes-gateway", "scope": "user", "display_name": "hermes-gateway"},
-            {"name": "server-dashboard", "scope": "system", "display_name": "server-dashboard"},
-            {"name": "docker.service", "scope": "system", "display_name": "docker"},
-            {"name": "ufw.service", "scope": "system", "display_name": "ufw"},
-            {"name": "ssh.service", "scope": "system", "display_name": "ssh"},
+            {"name": "hermes-gateway", "scope": "user", "display_name": "Hermes Gateway"},
+            {"name": "server-dashboard", "scope": "system", "display_name": "Dashboard"},
         ]
-    # Also add common system services that are always useful
-    common_services = [
-        ("docker.service", "system", "docker"),
-        ("ufw.service", "system", "ufw"),
-        ("ssh.service", "system", "ssh"),
-    ]
-    key_services = []
+
     for svc in cfg_services:
         name = svc["name"]
         svc_name = f"{name}.service" if not name.endswith(".service") else name
-        key_services.append((svc_name, svc.get("scope", "system"), svc.get("display_name", name)))
-    # Add common if not already listed
-    existing = {s[0] for s in key_services}
-    for cs in common_services:
-        if cs[0] not in existing:
-            key_services.append(cs)
-
-    for name, scope, display in key_services:
+        scope = svc.get("scope", "system")
+        display = svc.get("display_name", name)
+        allow_restart = svc.get("allow_restart", False)
         try:
             if scope == "user":
                 env = _user_env()
                 result = subprocess.run(
-                    ["systemctl", "--user", "show", name, "--property=ActiveState,SubState,MainPID,PID,MemoryCurrent,CPUUsageNSec"],
+                    ["systemctl", "--user", "show", svc_name, "--property=ActiveState,SubState,MainPID,PID,MemoryCurrent,CPUUsageNSec,ActiveEnterTimestamp"],
                     capture_output=True, text=True, timeout=5, env=env
                 )
             else:
                 result = subprocess.run(
-                    ["systemctl", "show", name, "--property=ActiveState,SubState,MainPID,PID,MemoryCurrent,CPUUsageNSec"],
+                    ["systemctl", "show", svc_name, "--property=ActiveState,SubState,MainPID,PID,MemoryCurrent,CPUUsageNSec,ActiveEnterTimestamp"],
                     capture_output=True, text=True, timeout=5
                 )
             props = {}
@@ -539,6 +561,45 @@ def get_services() -> list[dict]:
                 except (psutil.NoSuchProcess, psutil.AccessDenied, ValueError):
                     pass
 
+            # Compute uptime from ActiveEnterTimestamp
+            uptime_str = ""
+            uptime_seconds = 0
+            active_enter = props.get("ActiveEnterTimestamp", "")
+            if active_enter and active:
+                try:
+                    # systemd timestamp format: "Day YYYY-MM-DD HH:MM:SS TZ"
+                    # Use monotonic fallback: parse the timestamp
+                    # Try strptime for common format
+                    from datetime import datetime as _dt
+                    ts_str = active_enter.strip()
+                    # systemd format: "Fri 2026-05-09 14:35:22 -03"
+                    # Try multiple formats
+                    for fmt in (
+                        "%a %Y-%m-%d %H:%M:%S %z",
+                        "%a %Y-%m-%d %H:%M:%S",
+                        "%Y-%m-%d %H:%M:%S %z",
+                        "%Y-%m-%d %H:%M:%S",
+                    ):
+                        try:
+                            enter_dt = _dt.strptime(ts_str, fmt)
+                            uptime_seconds = time.time() - enter_dt.timestamp()
+                            break
+                        except ValueError:
+                            continue
+                    else:
+                        # Last resort: try direct parse
+                        try:
+                            import dateutil.parser
+                            enter_dt = dateutil.parser.parse(ts_str)
+                            uptime_seconds = time.time() - enter_dt.timestamp()
+                        except Exception:
+                            pass
+
+                    if uptime_seconds > 0:
+                        uptime_str = _format_duration(uptime_seconds)
+                except Exception:
+                    pass
+
             services.append({
                 "name": display,
                 "service": name,
@@ -547,6 +608,9 @@ def get_services() -> list[dict]:
                 "pid": pid_val,
                 "memory": _format_bytes(mem_bytes) if mem_bytes > 0 else "—",
                 "cpu": f"{cpu_pct:.1f}%" if cpu_pct > 0.1 else "0.0%",
+                "allow_restart": allow_restart,
+                "uptime": uptime_str,
+                "uptime_seconds": round(uptime_seconds),
             })
         except Exception:
             services.append({
@@ -557,9 +621,27 @@ def get_services() -> list[dict]:
                 "pid": None,
                 "memory": "—",
                 "cpu": "—",
+                "allow_restart": allow_restart,
+                "uptime": "",
+                "uptime_seconds": 0,
             })
 
     return services
+
+
+def _format_duration(seconds: float) -> str:
+    """Format duration in seconds to human-readable string."""
+    s = int(seconds)
+    if s < 60:
+        return f"{s}s"
+    m, s = divmod(s, 60)
+    if m < 60:
+        return f"{m}m {s}s"
+    h, m = divmod(m, 60)
+    if h < 24:
+        return f"{h}h {m}m"
+    d, h = divmod(h, 24)
+    return f"{d}d {h}h {m}m"
 
 
 def get_hermes_status() -> dict:
@@ -758,7 +840,14 @@ def _user_env() -> dict:
 
 # ── API Routes ────────────────────────────────────────────────────────
 
-@app.get("/")
+@app.get(
+    "/",
+    tags=["System"],
+    summary="Dashboard UI",
+    description="Serves the single-page retro terminal dashboard HTML.",
+    response_class=HTMLResponse,
+    responses={200: {"description": "HTML dashboard page"}},
+)
 async def index():
     html_path = STATIC_DIR / "index.html"
     if html_path.exists():
@@ -769,7 +858,41 @@ async def index():
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
-@app.get("/api/metrics")
+@app.get(
+    "/api/metrics",
+    tags=["System"],
+    summary="All system metrics",
+    description=(
+        "Returns a comprehensive snapshot of system health: CPU usage and frequency, "
+        "memory/swap/disk utilization, temperatures, network I/O rates, uptime, load averages, "
+        "sparkline histories, plus cached service/hermes/docker/connection data. "
+        "Results are TTL-cached (3 s base, 10–30 s for sub-queries) to avoid overloading the host."
+    ),
+    responses={
+        200: {
+            "description": "Full system metrics snapshot",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "cpu": {"percent": 12.5, "freq": {"current": 3200}, "count_logical": 8, "count_physical": 4, "model": "Intel Core i7-8550U"},
+                        "memory": {"total": 16777216000, "used": 6442450000, "available": 10334766000, "percent": 38.4, "cached": 2100000000},
+                        "swap": {"total": 4294967296, "used": 0, "percent": 0.0},
+                        "disk": {"total": 500107862016, "used": 245366878208, "free": 254740983808, "percent": 49.1, "mount": "/"},
+                        "uptime": "12d 5h 30m",
+                        "uptime_seconds": 1056600,
+                        "load": [0.75, 0.82, 0.91],
+                        "cpu_temp": 52.0,
+                        "network": {"rx_rate": 125000, "tx_rate": 42000, "rx_total": 10737418240, "tx_total": 5368709120},
+                        "hostname": "linuxmint",
+                        "os": "Linux 6.17.0-23-generic",
+                        "timestamp": "2026-05-09T21:30:00.000000",
+                        "sparklines": {"cpu": "▃▄▃▂▅▃▂▁▃▄", "temp": "▃▃▄▃▃▃▂▃▄▃", "net_rx": "▁▂▁▁▂▃▁▁▁▂", "net_tx": "▁▁▁▁▁▂▁▁▁▁"},
+                    }
+                }
+            },
+        }
+    },
+)
 async def metrics():
     m = _cached("metrics_base", 3, get_system_metrics)
     return {
