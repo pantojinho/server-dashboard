@@ -359,8 +359,15 @@
   @keyframes toastOut { from { opacity:1; transform: translateY(0); } to { opacity:0; transform: translateY(10px); } }
 
   /* SPARK */
-  .spark { font-size: 10px; color: var(--cyan); letter-spacing: 0.5px; line-height: 1; margin-top: 4px; overflow: hidden; }
-  .spark.gold { color: var(--yellow); }
+  .spark { position: relative; margin-top: 4px; width: 100%; height: 32px; }
+  .spark canvas { width: 100%; height: 100%; display: block; border-radius: 2px; }
+  .spark-tip {
+    position: absolute; display: none; padding: 3px 7px; font-size: 9px;
+    background: rgba(10,10,22,0.95); border: 1px solid var(--gold-dim);
+    border-radius: 3px; color: var(--text); pointer-events: none;
+    white-space: nowrap; z-index: 10; line-height: 1.3;
+    box-shadow: 0 0 6px rgba(255,215,0,0.1);
+  }
 
   /* GRAFICOS TAB */
   .chart-controls {
@@ -492,35 +499,35 @@
           <div class="metric">
             <span class="metric-label">CPU</span>
             <span class="metric-val" id="cpu-pct">--%</span>
-            <div class="gauge" id="cpu-gauge"></div>
+            <div class="spark" id="cpu-spark-wrap"><canvas id="cpu-canvas"></canvas><div class="spark-tip" id="cpu-tip"></div></div>
             <span class="metric-sub" id="cpu-info">---</span>
           </div>
           <div class="metric">
             <span class="metric-label">MEMORY</span>
             <span class="metric-val" id="mem-pct">--%</span>
-            <div class="gauge" id="mem-gauge"></div>
+            <div class="spark" id="mem-spark-wrap"><canvas id="mem-canvas"></canvas><div class="spark-tip" id="mem-tip"></div></div>
             <span class="metric-sub" id="mem-info">---</span>
           </div>
           <div class="metric">
             <span class="metric-label">DISK /</span>
             <span class="metric-val" id="disk-pct">--%</span>
-            <div class="gauge" id="disk-gauge"></div>
+            <div class="spark" id="disk-spark-wrap"><canvas id="disk-canvas"></canvas><div class="spark-tip" id="disk-tip"></div></div>
             <span class="metric-sub" id="disk-info">---</span>
           </div>
           <div class="metric">
             <span class="metric-label">SWAP</span>
             <span class="metric-val cyan" id="swap-pct">--%</span>
-            <div class="gauge" id="swap-gauge"></div>
+            <div class="spark" id="swap-spark-wrap"><canvas id="swap-canvas"></canvas><div class="spark-tip" id="swap-tip"></div></div>
             <span class="metric-sub" id="swap-info">---</span>
           </div>
           <div class="metric">
             <span class="metric-label">CPU HIST</span>
-            <div class="spark" id="cpu-spark">---</div>
+            <div class="spark" id="cpu-hist-spark-wrap"><canvas id="cpu-hist-canvas"></canvas><div class="spark-tip" id="cpu-hist-tip"></div></div>
             <span class="metric-sub">last 60 samples</span>
           </div>
           <div class="metric">
             <span class="metric-label">TEMP HIST</span>
-            <div class="spark gold" id="temp-spark">---</div>
+            <div class="spark" id="temp-spark-wrap"><canvas id="temp-canvas"></canvas><div class="spark-tip" id="temp-tip"></div></div>
             <span class="metric-sub" id="temp-now">---</span>
           </div>
         </div>
@@ -796,7 +803,8 @@
 // ===== STATE =====
 console.log('JS INICIOU');
 const S = {
-  cpuH: [], tempH: [], netRxH: [], netTxH: [],
+  cpuH: [], tempH: [], memH: [], diskH: [], swapH: [],
+  netRxH: [], netTxH: [],
   lastMetrics: null, lastNeofetch: null, lastDocker: null, lastConns: null,
   lastServices: null, lastHermes: null, lastBot: null
 };
@@ -817,12 +825,176 @@ function gauge(pct, len=10) {
   const n = Math.min(len, Math.round(pct/100*len));
   return '<span class="on' + (pct>=80?' crit':pct>=60?' warn':'') + '">' + '█'.repeat(n) + '</span>' + '░'.repeat(len-n);
 }
-function sparkline(data, min=0, max=100) {
-  if (!data || !data.length) return '---';
-  const bars = '▁▂▃▄▅▆▇';
-  const range = max-min || 1;
-  return data.map(v => bars[Math.min(bars.length-1, Math.floor((v-min)/range * bars.length))]).join('');
+
+// ===== CANVAS SPARKLINE ENGINE =====
+const SPARK_CFG = {
+  cpu:      { key:'cpuH',  warn:60, crit:80, color:'#00ff88' },
+  mem:      { key:'memH',  warn:60, crit:80, color:'#00ff88' },
+  disk:     { key:'diskH', warn:70, crit:85, color:'#00ff88' },
+  swap:     { key:'swapH', warn:40, crit:70, color:'#00d4ff' },
+  'cpu-hist':{ key:'cpuH', warn:60, crit:80, color:'#00ff88' },
+  temp:     { key:'tempH', warn:65, crit:80, color:'#ffcc00' },
+};
+
+function lerpColor(a, b, t) {
+  const p = (c,i) => parseInt(c.slice(1+i*2,3+i*2),16);
+  const r = Math.round(p(a,0)+(p(b,0)-p(a,0))*t);
+  const g = Math.round(p(a,1)+(p(b,1)-p(a,1))*t);
+  const bl= Math.round(p(a,2)+(p(b,2)-p(a,2))*t);
+  return `rgb(${r},${g},${bl})`;
 }
+
+function sparkColor(val, warn, crit) {
+  if (val >= crit) return '#ff4444';
+  if (val >= warn) return lerpColor('#ffcc00', '#ff4444', (val-warn)/(crit-warn));
+  return lerpColor('#00ff88', '#ffcc00', Math.max(0, val/warn));
+}
+
+function drawSparkline(canvasId, data, cfg) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas || !data || data.length < 2) return;
+  const rect = canvas.parentElement.getBoundingClientRect();
+  if (rect.width < 1 || rect.height < 1) return;
+  const dpr = window.devicePixelRatio || 1;
+  const w = rect.width;
+  const h = rect.height;
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+  canvas.style.width = w + 'px';
+  canvas.style.height = h + 'px';
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, w, h);
+
+  const pad = { t: 3, b: 3, l: 0, r: 0 };
+  const pw = w - pad.l - pad.r;
+  const ph = h - pad.t - pad.b;
+
+  // Auto-scale Y axis from data
+  let minV = Infinity, maxV = -Infinity;
+  for (const v of data) { if (v < minV) minV = v; if (v > maxV) maxV = v; }
+  const range = maxV - minV || 1;
+  const yMin = minV - range * 0.05;
+  const yRange = range * 1.1;
+
+  const step = pw / (data.length - 1);
+  const lastVal = data[data.length - 1];
+  const baseCol = sparkColor(lastVal, cfg.warn, cfg.crit);
+
+  // Build path points
+  const pts = [];
+  for (let i = 0; i < data.length; i++) {
+    pts.push({
+      x: pad.l + i * step,
+      y: pad.t + ph - ((data[i] - yMin) / yRange) * ph
+    });
+  }
+
+  // Gradient fill
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+  ctx.lineTo(pts[pts.length-1].x, h);
+  ctx.lineTo(pts[0].x, h);
+  ctx.closePath();
+  const grad = ctx.createLinearGradient(0, pad.t, 0, h);
+  grad.addColorStop(0, colorToRgba(baseCol, 0.25));
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // Line
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+  ctx.strokeStyle = baseCol;
+  ctx.lineWidth = 1.5;
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+
+  // Last-value dot with glow
+  const lp = pts[pts.length-1];
+  ctx.beginPath();
+  ctx.arc(lp.x, lp.y, 2.5, 0, Math.PI*2);
+  ctx.fillStyle = baseCol;
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(lp.x, lp.y, 5, 0, Math.PI*2);
+  ctx.strokeStyle = colorToRgba(baseCol, 0.35);
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // Store for tooltip hit detection
+  canvas._sparkData = data;
+  canvas._sparkCfg = cfg;
+  canvas._sparkLayout = { pad, step, yMin, yRange, ph, w, h };
+}
+
+function colorToRgba(hexOrRgb, a) {
+  if (hexOrRgb.startsWith('#')) {
+    const r = parseInt(hexOrRgb.slice(1,3),16);
+    const g = parseInt(hexOrRgb.slice(3,5),16);
+    const b = parseInt(hexOrRgb.slice(5,7),16);
+    return `rgba(${r},${g},${b},${a})`;
+  }
+  return hexOrRgb.replace('rgb(', 'rgba(').replace(')', ',' + a + ')');
+}
+
+function drawAllSparklines() {
+  for (const [id, cfg] of Object.entries(SPARK_CFG)) {
+    drawSparkline(id + '-canvas', S[cfg.key], cfg);
+  }
+}
+
+// Tooltip handler
+function initSparkTooltips() {
+  document.querySelectorAll('.spark canvas').forEach(canvas => {
+    const tip = canvas.parentElement.querySelector('.spark-tip');
+    if (!tip) return;
+
+    canvas.addEventListener('mousemove', e => {
+      const data = canvas._sparkData;
+      const cfg = canvas._sparkCfg;
+      const layout = canvas._sparkLayout;
+      if (!data || !layout) return;
+
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const idx = Math.round((mx - layout.pad.l) / layout.step);
+      if (idx < 0 || idx >= data.length) { tip.style.display = 'none'; return; }
+
+      const val = data[idx];
+      const col = sparkColor(val, cfg.warn, cfg.crit);
+      const label = canvas.id.replace('-canvas', '').replace('-hist', ' HIST').toUpperCase();
+      tip.innerHTML = '<span style="color:' + col + '">' + val.toFixed(1) + '</span> <span style="color:var(--text-dim)">#' + (idx+1) + '</span>';
+      tip.style.display = 'block';
+
+      // Position tooltip
+      const tipW = tip.offsetWidth;
+      let tx = mx - tipW / 2;
+      if (tx < 0) tx = 0;
+      if (tx + tipW > rect.width) tx = rect.width - tipW;
+      tip.style.left = tx + 'px';
+      tip.style.bottom = (rect.height + 2) + 'px';
+    });
+
+    canvas.addEventListener('mouseleave', () => {
+      tip.style.display = 'none';
+    });
+  });
+}
+
+// ResizeObserver for responsive redraw
+let _sparkResizeTimer = null;
+function initSparkResize() {
+  const grid = document.querySelector('.sys-grid');
+  if (!grid) return;
+  new ResizeObserver(() => {
+    clearTimeout(_sparkResizeTimer);
+    _sparkResizeTimer = setTimeout(drawAllSparklines, 80);
+  }).observe(grid);
+}
+
 function colorClass(v, w=60, c=80) { return v>=c?' crit':v>=w?' warn':''; }
 function showToast(msg, type='success') {
   const c = document.getElementById('toast-container');
@@ -894,32 +1066,31 @@ function renderMetrics(d) {
   const cpuPct = d.cpu ? Math.round(d.cpu.percent||0) : 0;
   document.getElementById('cpu-pct').textContent = cpuPct + '%';
   document.getElementById('cpu-pct').className = 'metric-val' + colorClass(cpuPct);
-  document.getElementById('cpu-gauge').innerHTML = gauge(cpuPct);
   if (d.cpu) document.getElementById('cpu-info').textContent = Math.round(d.cpu.freq?.current || d.cpu.freq || 0) + 'MHz · ' + (d.cpu.count_logical || d.cpu.count_physical || '?') + ' cores';
   S.cpuH.push(cpuPct); if (S.cpuH.length > 60) S.cpuH.shift();
-  document.getElementById('cpu-spark').textContent = sparkline(S.cpuH, 0, 100);
   const memPct = d.memory ? Math.round(d.memory.percent||0) : 0;
   document.getElementById('mem-pct').textContent = memPct + '%';
   document.getElementById('mem-pct').className = 'metric-val' + colorClass(memPct);
-  document.getElementById('mem-gauge').innerHTML = gauge(memPct);
   if (d.memory) document.getElementById('mem-info').textContent = d.memory.used + ' / ' + d.memory.total;
+  S.memH.push(memPct); if (S.memH.length > 60) S.memH.shift();
   const diskPct = d.disk ? Math.round(d.disk.percent||0) : 0;
   document.getElementById('disk-pct').textContent = diskPct + '%';
   document.getElementById('disk-pct').className = 'metric-val' + colorClass(diskPct);
-  document.getElementById('disk-gauge').innerHTML = gauge(diskPct);
   if (d.disk) document.getElementById('disk-info').textContent = d.disk.used + ' / ' + d.disk.total;
+  S.diskH.push(diskPct); if (S.diskH.length > 60) S.diskH.shift();
   const swapPct = d.swap ? Math.round(d.swap.percent||0) : 0;
   document.getElementById('swap-pct').textContent = swapPct + '%';
-  document.getElementById('swap-gauge').innerHTML = gauge(swapPct);
+  document.getElementById('swap-pct').className = 'metric-val cyan' + colorClass(swapPct, 40, 70);
   if (d.swap) document.getElementById('swap-info').textContent = d.swap.used + ' / ' + d.swap.total;
+  S.swapH.push(swapPct); if (S.swapH.length > 60) S.swapH.shift();
   const temp = d.cpu_temp || 0;
   S.tempH.push(temp); if (S.tempH.length > 60) S.tempH.shift();
-  document.getElementById('temp-spark').textContent = sparkline(S.tempH, 30, 90);
   document.getElementById('temp-now').textContent = temp ? temp.toFixed(1) + '°C' : '---';
+  // Redraw all canvas sparklines
+  drawAllSparklines();
   if (d.uptime) document.getElementById('footer-info').textContent = 'Uptime: ' + d.uptime + ' | Load: ' + d.load.map(x=>x.toFixed(2)).join(' ');
   if (d.network) document.getElementById('footer-info').textContent += ' | RX: ' + d.network.rx_total + ' | TX: ' + d.network.tx_total;
 }
-
 function renderNeofetch(d) {
   // Dynamic user@host
   const user = d.user || d.os_id || 'user';
@@ -1502,6 +1673,8 @@ fetchMetrics(); fetchNeofetch(); fetchDocker(); fetchConnections(); fetchService
 loadModels(); loadOpsHermes();
 loadGraficos();
 loadKanban();
+initSparkTooltips();
+initSparkResize();
 setInterval(fetchMetrics, 5000);
 setInterval(fetchNeofetch, 30000);
 setInterval(fetchDocker, 15000);
@@ -1544,6 +1717,203 @@ async function loadKanban() {
     }).join('');
   } catch(e) { console.error('Kanban error:', e); }
 }
+
+// ===== SETTINGS =====
+let _settingsSchema = null;
+let _settingsValues = null;
+
+async function loadSettings() {
+  const form = document.getElementById('settings-form');
+  const loading = document.getElementById('settings-loading');
+  const groups = document.getElementById('settings-groups');
+  const banner = document.getElementById('settings-restart-banner');
+  banner.style.display = 'none';
+
+  try {
+    const resp = await fetch('/api/settings');
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error);
+
+    _settingsSchema = data.schema;
+    _settingsValues = data.values;
+
+    // Build form groups
+    groups.innerHTML = '';
+    for (const group of data.schema) {
+      const gEl = document.createElement('div');
+      gEl.className = 'settings-group';
+      const title = document.createElement('div');
+      title.className = 'settings-group-title';
+      title.textContent = group.icon + ' ' + group.group;
+      gEl.appendChild(title);
+
+      const body = document.createElement('div');
+      body.className = 'settings-group-body';
+
+      for (const field of group.fields) {
+        const fEl = document.createElement('div');
+        fEl.className = 'settings-field';
+
+        const label = document.createElement('label');
+        label.textContent = field.label;
+        label.setAttribute('for', 'sf-' + field.key);
+        fEl.appendChild(label);
+
+        let input;
+        if (field.type === 'select') {
+          input = document.createElement('select');
+          for (const opt of (field.options || [])) {
+            const o = document.createElement('option');
+            o.value = opt; o.textContent = opt;
+            input.appendChild(o);
+          }
+        } else {
+          input = document.createElement('input');
+          input.type = field.type === 'number' ? 'number' : 'text';
+          if (field.min !== undefined) input.min = field.min;
+          if (field.max !== undefined) input.max = field.max;
+          if (field.placeholder) input.placeholder = field.placeholder;
+        }
+        input.id = 'sf-' + field.key;
+        input.dataset.key = field.key;
+        input.dataset.type = field.type;
+        input.value = data.values[field.key] !== undefined && data.values[field.key] !== null ? data.values[field.key] : '';
+        fEl.appendChild(input);
+
+        // Validation hint
+        if (field.min !== undefined || field.max !== undefined) {
+          const hint = document.createElement('div');
+          hint.className = 'field-hint';
+          const parts = [];
+          if (field.min !== undefined) parts.push('min: ' + field.min);
+          if (field.max !== undefined) parts.push('max: ' + field.max);
+          hint.textContent = parts.join(' · ');
+          fEl.appendChild(hint);
+        }
+
+        body.appendChild(fEl);
+      }
+
+      gEl.appendChild(body);
+      groups.appendChild(gEl);
+    }
+
+    loading.style.display = 'none';
+    form.style.display = 'block';
+    document.getElementById('settings-status').textContent = 'Loaded at ' + new Date().toLocaleTimeString();
+
+  } catch(e) {
+    loading.textContent = 'Error: ' + e.message;
+    loading.style.color = 'var(--red)';
+  }
+}
+
+async function saveSettings() {
+  const status = document.getElementById('settings-status');
+  const errDiv = document.getElementById('settings-errors');
+  const banner = document.getElementById('settings-restart-banner');
+  errDiv.style.display = 'none';
+  status.textContent = 'Saving...';
+  status.style.color = 'var(--gold)';
+
+  // Collect values from form
+  const values = {};
+  const inputs = document.querySelectorAll('#settings-form [data-key]');
+  for (const input of inputs) {
+    let val = input.value;
+    if (input.dataset.type === 'number') {
+      val = val === '' ? 0 : Number(val);
+    }
+    values[input.dataset.key] = val;
+  }
+
+  try {
+    const resp = await fetch('/api/settings', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({values}),
+    });
+    const data = await resp.json();
+
+    if (!resp.ok || !data.success) {
+      // Show validation errors
+      if (data.errors && data.errors.length > 0) {
+        errDiv.innerHTML = '<ul class="settings-error-list">' +
+          data.errors.map(e => '<li>' + esc(e) + '</li>').join('') + '</ul>';
+        errDiv.style.display = 'block';
+        // Mark invalid fields
+        for (const input of inputs) {
+          input.classList.remove('invalid');
+          for (const err of data.errors) {
+            if (err.includes(input.dataset.key) || err.includes(document.querySelector('label[for="' + input.id + '"]')?.textContent || '')) {
+              input.classList.add('invalid');
+            }
+          }
+        }
+      }
+      status.textContent = data.error || 'Validation failed';
+      status.style.color = 'var(--red)';
+      return;
+    }
+
+    // Success
+    status.textContent = '✓ Saved at ' + new Date().toLocaleTimeString() + ' (backup: ' + (data.backup || 'N/A') + ')';
+    status.style.color = 'var(--green)';
+    toast('Settings saved successfully!', 'success');
+
+    // Show restart banner
+    if (data.restart_required) {
+      banner.style.display = 'block';
+    }
+
+    // Reload to reflect changes
+    _settingsValues = values;
+
+  } catch(e) {
+    status.textContent = 'Error: ' + e.message;
+    status.style.color = 'var(--red)';
+  }
+}
+
+async function restartDashboard() {
+  const msg = document.getElementById('settings-restart-msg');
+  msg.textContent = 'Restarting dashboard service...';
+  msg.style.color = 'var(--gold)';
+
+  try {
+    const resp = await fetch('/api/settings/restart-dashboard', {method: 'POST'});
+    const data = await resp.json();
+
+    if (data.success) {
+      msg.textContent = '✓ Restart command sent. This page will reconnect shortly...';
+      msg.style.color = 'var(--green)';
+      toast('Dashboard restarting...', 'info');
+      // Try to reconnect after 5s
+      setTimeout(() => {
+        msg.textContent = 'Attempting to reconnect...';
+        const check = setInterval(() => {
+          fetch('/api/settings').then(r => {
+            if (r.ok) {
+              clearInterval(check);
+              msg.textContent = '✓ Dashboard is back online!';
+              msg.style.color = 'var(--green)';
+              toast('Dashboard restarted successfully!', 'success');
+            }
+          }).catch(() => {});
+        }, 2000);
+        // Stop trying after 30s
+        setTimeout(() => clearInterval(check), 30000);
+      }, 5000);
+    } else {
+      msg.textContent = '✗ ' + (data.message || 'Restart failed');
+      msg.style.color = 'var(--red)';
+    }
+  } catch(e) {
+    msg.textContent = '✗ Error: ' + e.message;
+    msg.style.color = 'var(--red)';
+  }
+}
+
 function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 </script>
 </body>
