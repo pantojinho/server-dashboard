@@ -1,39 +1,77 @@
-# Hermes Server Dashboard v2
-
-[![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/pantojinho/server-dashboard/pulls)
+# Hermes Server Dashboard v3
 
 A retro terminal-style web dashboard for monitoring Linux servers, Hermes Agent instances, and trading bots. Zero dependencies beyond Python — no Node.js build step, no external database.
 
 Built for homelab setups, designed to be cloned, configured, and extended in minutes.
 
-![Hermes Server Dashboard](static/dashboard_homepage.png)
-![Bot Trade Tab](static/dashboard_bot_trade.png)
-![Charts Tab](static/dashboard_charts.png)
+![Dashboard Screenshot](docs/img/dashboard-screenshot.png)
 
 ## Features
 
-- **System Overview** -- CPU, RAM, disk, swap, temperatures, network with live sparklines
-- **Service Management** -- Monitor and restart systemd services from the browser
-- **Hermes Agent** -- Live status of model, provider, platforms, cron jobs, sessions, kanban board
-- **Trading Bot** -- Binance bot integration with live P&L, regime, indicators, decision log
-- **Time-Series Charts** -- Embedded SQLite TSDB with Chart.js visualization (no Prometheus needed)
-- **Log Viewer** -- Real-time journalctl log viewer with filtering
-- **Operations Panel** -- Switch AI models, create config backups, quick actions
-- **Plugin System** -- Extend with custom tabs, API endpoints, and metric collectors
+- **System Overview** — CPU, RAM, disk, swap, temperatures, network with live sparklines
+- **Service Management** — Monitor and restart systemd services from the browser
+- **Hermes Agent** — Live status of model, provider, platforms, cron jobs, sessions, kanban board
+- **Trading Bot** — Binance bot integration with live P&L, regime, indicators, decision log
+- **Time-Series Charts** — Embedded SQLite TSDB with Chart.js visualization (no Prometheus needed)
+- **Log Viewer** — Real-time journalctl log viewer with filtering
+- **Operations Panel** — Switch AI models, create config backups, quick actions
+- **Network Scanner** — Discover devices on your LAN with vendor detection and auto-refresh
+- **Health Panel** — Click the health badge for system resources + connectivity status
+- **Plugin System** — Extend with custom tabs, API endpoints, and metric collectors
+- **Feature Flags** — Sections auto-hide when integrations aren't configured (bot, miner, etc.)
 
-## Demo
+## What's New in v3
 
-See [dashboard_demo.gif](static/dashboard_demo.gif) for a live animation of the dashboard updating in real-time:
+- 🔍 **Network Scanner Plugin** — Discover LAN devices via nmap, shows vendor/type/IP/MAC
+- 🏥 **Health Panel** — Click the HEALTHY/WARNING badge for detailed system health
+- 🧩 **Feature Flags API** — `/api/features` auto-hides bot/miner sections when not configured
+- 📡 **Manual Scan Button** — Force a network scan with ⟳ SCAN NOW
+- 🎯 **Favicon** — Proper Hermes logo favicon in browser tab
+- 📐 **Full-width Network Widget** — Network Scanner spans full width in Operations tab
+- 🏷️ **Dynamic Hostname** — No more hardcoded hostnames, adapts to any machine
 
-![Live Demo](static/dashboard_demo.gif)
+## API Documentation
+
+The dashboard exposes a comprehensive REST API for system metrics, service management, and Hermes Agent integration.
+
+**Interactive Documentation:**
+- [Swagger UI (ReDoc)](http://localhost:18791/docs) — Interactive API explorer with "Try it out" functionality
+- [ReDoc](http://localhost:18791/redoc) — Clean, reference-style documentation
+
+Replace `localhost:18791` with your actual host and port if configured differently.
+
+### Quick API Reference
+
+- Endpoint | Method | Description
+- `/docs` | GET | Swagger UI interactive documentation
+- `/redoc` | GET | ReDoc reference documentation
+- `/api/metrics` | GET | All system metrics + sparklines + services + hermes status
+- `/api/health` | GET | Health status (system resources + connections)
+- `/api/features` | GET | Feature flags (which integrations are enabled)
+- `/api/kanban` | GET | Active kanban tasks from Hermes
+- `/api/hermes` | GET | Hermes agent status, cron jobs, sessions
+- `/api/hermes/models` | GET | Available AI models
+- `/api/hermes/model` | POST | Switch AI model
+- `/api/services` | GET | Monitored services status
+- `/api/service/{name}/restart` | POST | Restart a service
+- `/api/logs/{service}` | GET | Journalctl logs
+- `/api/docker` | GET | Docker containers
+- `/api/connections` | GET | Network connectivity checks
+- `/api/backup` | POST | Create config backup
+- `/api/graficos/dashboard` | GET | All TSDB chart data
+- `/api/graficos/series` | GET | Single metric time-series
+- `/api/network-scanner/devices` | GET | Discovered LAN devices
+- `/api/network-scanner/scan` | POST | Force network scan
+- `/api/plugins` | GET | List loaded plugins
+- `/api/settings` | GET/POST | Dashboard settings
+- `/bot-api/*` | GET | Proxy to trading bot API
 
 ## Requirements
 
 - **Linux** (systemd-based)
 - **Python 3.10+**
-- **Hermes Agent** (optional -- dashboard reads `~/.hermes/` for agent data)
+- **Hermes Agent** (optional — dashboard reads `~/.hermes/` for agent data)
+- **nmap** (optional — for network scanner plugin)
 
 ## Quick Install
 
@@ -67,35 +105,32 @@ cp config.example.yaml config.yaml
 
 Edit `config.yaml` (created from `config.example.yaml`):
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `server.port` | `18791` | HTTP port |
-| `server.host` | `0.0.0.0` | Bind address |
-| `sudo_mode` | `"none"` | How to restart system services |
-| `services` | -- | List of systemd services to monitor |
-| `metrics.scrape_interval` | `30` | Seconds between metric collections |
-| `metrics.retention_days` | `35` | Days of TSDB data to keep |
-| `integrations.bot_api_url` | -- | Trading bot API URL |
-| `integrations.bitsy_url` | -- | BitsyMiner ESP32 API URL |
-| `hermes.gateway_service` | `hermes-gateway.service` | Gateway systemd service name |
+- **Setting** | **Default** | **Description**
+- `server.port` | `18791` | HTTP port
+- `server.host` | `0.0.0.0` | Bind address
+- `sudo_mode` | `"none"` | How to restart system services
+- `services` | — | List of systemd services to monitor
+- `metrics.scrape_interval` | `30` | Seconds between metric collections
+- `metrics.retention_days` | `35` | Days of TSDB data to keep
+- `integrations.bot_api_url` | — | Trading bot API URL (empty = hidden)
+- `integrations.bitsy_url` | — | BitsyMiner ESP32 API URL (empty = hidden)
+- `hermes.gateway_service` | `hermes-gateway.service` | Gateway systemd service name
 
 ### Environment Variables
 
-| Variable | Purpose |
-|----------|---------|
-| `SUDO_PASSWORD` | Password for sudo (if `sudo_mode: sudo_password`) |
-| `DASHBOARD_PASSWORD` | If set, enables Basic Auth on all endpoints |
-| `TELEGRAM_BOT_TOKEN` | For alert notifications |
-| `TELEGRAM_CHAT_ID` | For alert notifications |
-| `HERMES_HOME` | Path to Hermes config dir (default: `~/.hermes`) |
-| `HERMES_GATEWAY_SERVICE` | Override gateway service name |
+- **Variable** | **Purpose**
+- `SUDO_PASSWORD` | Password for sudo (if `sudo_mode: sudo_password`)
+- `DASHBOARD_PASSWORD` | If set, enables Basic Auth on all endpoints
+- `TELEGRAM_BOT_TOKEN` | For alert notifications
+- `TELEGRAM_CHAT_ID` | For alert notifications
+- `HERMES_HOME` | Path to Hermes config dir (default: `~/.hermes`)
 
 ### Sudo Modes
 
-- `none` -- Restart buttons won't work for system services (user services still work)
-- `sudo_nopasswd` -- Requires passwordless sudo: `youruser ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart *`
-- `sudo_password` -- Pipe password to sudo (set `SUDO_PASSWORD` env var)
-- `systemd_user` -- All services are user services, no sudo needed
+- `none` — Restart buttons won't work for system services
+- `sudo_nopasswd` — Requires passwordless sudo configured
+- `sudo_password` — Pipe password to sudo (set `SUDO_PASSWORD` env var)
+- `systemd_user` — All services are user services, no sudo needed
 
 ## Plugin System
 
@@ -121,7 +156,7 @@ class MyPlugin(DashboardPlugin):
         return "MY PLUGIN"
 
     def tab_html(self) -> str:
-        return '<div class="panel"><div class="panel-header">My Plugin</div>'
+        return '<div class="panel"><div class="panel-header">My Plugin</div>' \
                '<div class="panel-body">Hello from my plugin!</div></div>'
 
     def register_routes(self, app):
@@ -130,87 +165,41 @@ class MyPlugin(DashboardPlugin):
             return {"status": "ok"}
 ```
 
-Plugins are auto-discovered on server start. See `plugins/example_plugin.py.example` for a complete reference.
+Plugins are auto-discovered on server start.
 
 ### Plugin Hooks
 
-| Method | Purpose |
-|--------|---------|
-| `name` | Machine name (used in URLs) |
-| `display_name` | Tab label |
-| `tab_html()` | HTML content for the tab panel |
-| `nav_button_html()` | Custom nav button |
-| `scripts_html()` | JavaScript to include |
-| `styles_html()` | Additional CSS |
-| `register_routes(app)` | Register FastAPI endpoints |
-| `collect_metrics()` | Return metrics for TSDB (called every 30s) |
-| `on_load()` | Initialization hook |
-| `on_unload()` | Cleanup hook |
-
-### Plugin API Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/plugins` | GET | List all loaded plugins |
-| `/api/plugins/{name}/tab` | GET | Get plugin tab HTML |
+- **Method** | **Purpose**
+- `name` | Machine name (used in URLs)
+- `display_name` | Tab label
+- `tab_html()` | HTML content for the tab panel
+- `scripts_html()` | JavaScript to include
+- `styles_html()` | Additional CSS
+- `register_routes(app)` | Register FastAPI endpoints
+- `collect_metrics()` | Return metrics for TSDB (called every 30s)
+- `on_load()` | Initialization hook
 
 ## Architecture
 
 ```
-server.py              # FastAPI backend -- API routes + metric collectors
+server.py              # FastAPI backend — API routes + metric collectors
 metrics_tsdb.py        # SQLite time-series database with background collector
 plugins/
   __init__.py          # Plugin system exports
   base.py              # DashboardPlugin base class
   loader.py            # Plugin discovery and registration
-  example_plugin.py.example  # Reference plugin (rename .py to enable)
+  network_scanner.py   # Network device discovery plugin
 config.yaml            # User configuration (not committed to git)
+config.example.yaml    # Template config (committed, safe defaults)
 static/
   index.html           # Single-page dashboard (HTML + CSS + JS, no build step)
   hermes-logo.png      # Logo asset
+  favicon.ico          # Browser tab icon
 ```
-
-## API Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/metrics` | GET | All system metrics + sparklines + services + hermes status |
-| `/api/kanban` | GET | Active kanban tasks from Hermes |
-| `/api/hermes` | GET | Hermes agent status, cron jobs, sessions |
-| `/api/hermes/models` | GET | Available AI models |
-| `/api/hermes/model` | POST | Switch AI model |
-| `/api/services` | GET | Monitored services status |
-| `/api/service/{name}/restart` | POST | Restart a service |
-| `/api/logs/{service}` | GET | Journalctl logs (hermes/bot/dashboard/watchdog) |
-| `/api/docker` | GET | Docker containers |
-| `/api/connections` | GET | Network connectivity checks |
-| `/api/backup` | POST | Create config backup |
-| `/api/graficos/dashboard` | GET | All TSDB chart data |
-| `/api/graficos/series` | GET | Single metric time-series |
-| `/api/graficos/status` | GET | TSDB collector status |
-| `/api/plugins` | GET | List loaded plugins |
-| `/api/plugins/{name}/tab` | GET | Plugin tab content |
-| `/bot-api/*` | GET | Proxy to trading bot API |
-
-## Screenshots
-
-The dashboard features a dark retro-terminal aesthetic with:
-- Phosphor-green on dark-blue-black background
-- Monospace font (Fira Code) throughout
-- ASCII art neofetch display
-- Glowing status indicators
-- Sparkline mini-charts for live metrics
-- 5-tab layout: SYSTEM, BOT TRADE, OPERATIONS, LOGS, CHARTS
-
-![Dashboard Homepage](static/dashboard_homepage.png)
-![Bot Trade Tab](static/dashboard_bot_trade.png)
-![Charts Tab](static/dashboard_charts.png)
-
-See [dashboard_demo.gif](static/dashboard_demo.gif) for a live animation of the dashboard updating in real-time.
 
 ## Theme Customization
 
-The dashboard uses CSS custom properties for theming. Override in a custom `<style>` or modify `index.html`:
+The dashboard uses CSS custom properties for theming:
 
 ```css
 :root {
@@ -227,11 +216,7 @@ The dashboard uses CSS custom properties for theming. Override in a custom `<sty
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on code style, plugins, and PRs.
-
-## Changelog
-
-See [CHANGELOG.md](CHANGELOG.md) for a complete list of changes.
+PRs welcome! The codebase is a single-page app with no build step — just edit and refresh.
 
 ## License
 

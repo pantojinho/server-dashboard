@@ -347,6 +347,19 @@ def _send_telegram_alert(message: str, alert_key: str):
     now = time.time()
     if alert_key in _last_alerts and now - _last_alerts[alert_key] < ALERT_COOLDOWN:
         return
+
+    # Respect config: integrations.telegram.enabled
+    try:
+        cfg_path = Path(__file__).parent / "config.yaml"
+        if cfg_path.exists():
+            import yaml as _yaml
+            with open(cfg_path) as f:
+                _cfg = _yaml.safe_load(f) or {}
+            if str(_cfg.get("integrations", {}).get("telegram", {}).get("enabled", "true")).lower() != "true":
+                logger.debug(f"Alert skipped (telegram alerts disabled): {alert_key}")
+                return
+    except Exception:
+        pass
     _last_alerts[alert_key] = now
 
     try:
@@ -402,12 +415,12 @@ def check_alerts(system_data: dict, bitsy_data: dict, bot_data: dict):
             "temp_high"
         )
 
-    # BitsyMiner down (hashrate = 0)
-    if bitsy_data.get("hashrate", 0) == 0:
-        _send_telegram_alert(
-            "⛏ BitsyMiner: <b>Hashrate = 0</b> — possível queda",
-            "bitsy_down"
-        )
+    # BitsyMiner down (hashrate = 0) — DISABLED: miner não precisa de monitoramento
+    # if bitsy_data.get("hashrate", 0) == 0:
+    #     _send_telegram_alert(
+    #         "⛏ BitsyMiner: <b>Hashrate = 0</b> — possível queda",
+    #         "bitsy_down"
+    #     )
 
     # Bot down
     if bot_data.get("equity", 0) == 0 and bot_data.get("pnl", 0) == 0 and bot_data.get("price", 0) == 0:

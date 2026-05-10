@@ -3,7 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>HERMES SERVER OPS</title>
+<title>Hermes Server Dashboard</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400;500;700&display=swap');
 
@@ -97,6 +98,90 @@
   .live-badge { color: var(--green); text-shadow: 0 0 6px var(--green); font-weight: 700; letter-spacing: 1px; }
   .live-dot { display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: var(--green); box-shadow: 0 0 4px var(--green); animation: pulse 2s infinite; margin-right: 3px; }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+  /* HEALTH BADGE */
+  .health-badge {
+    display: flex; align-items: center; gap: 6px;
+    padding: 3px 10px; border-radius: 2px;
+    font-size: 10px; font-weight: 600;
+    cursor: pointer; user-select: none;
+    transition: all 0.3s ease;
+    text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .health-badge:hover { transform: scale(1.03); }
+  .health-dot { width: 8px; height: 8px; border-radius: 50%; animation: pulse 2s infinite; }
+  .health-dot.green { background: var(--green); box-shadow: 0 0 8px var(--green); }
+  .health-dot.yellow { background: var(--yellow); box-shadow: 0 0 8px var(--yellow); }
+  .health-dot.red { background: var(--red); box-shadow: 0 0 8px var(--red); animation: critPulse 1.5s ease-in-out infinite; }
+  .health-label { color: var(--text); }
+  .health-label.green { color: var(--green); text-shadow: 0 0 4px var(--green); }
+  .health-label.yellow { color: var(--yellow); text-shadow: 0 0 4px var(--yellow); }
+  .health-label.red { color: var(--red); text-shadow: 0 0 4px var(--red); }
+
+  /* HEALTH DETAIL PANEL */
+  .health-panel {
+    position: fixed; top: 50px; right: 16px;
+    width: 320px; max-height: 500px;
+    background: rgba(10,10,22,0.98);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+    backdrop-filter: blur(12px);
+    z-index: 9999;
+    display: none;
+    flex-direction: column;
+    animation: panelSlideIn 0.3s ease;
+  }
+  .health-panel.open { display: flex; }
+  @keyframes panelSlideIn {
+    from { opacity: 0; transform: translateY(-10px) scale(0.95); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .health-panel-header {
+    padding: 8px 12px; border-bottom: 1px solid var(--border);
+    display: flex; justify-content: space-between; align-items: center;
+    background: linear-gradient(90deg, rgba(205,127,50,0.1) 0%, rgba(184,134,11,0.05) 100%);
+  }
+  .health-panel-title { font-size: 10px; font-weight: 600; color: var(--gold-dark); text-transform: uppercase; letter-spacing: 1px; }
+  .health-panel-close {
+    background: none; border: none; color: var(--text-dim);
+    font-size: 14px; cursor: pointer; padding: 0 4px;
+    transition: color 0.2s ease;
+  }
+  .health-panel-close:hover { color: var(--red); }
+  .health-panel-body {
+    padding: 12px; overflow-y: auto; flex: 1;
+  }
+  .health-section { margin-bottom: 12px; }
+  .health-section:last-child { margin-bottom: 0; }
+  .health-section-title {
+    font-size: 9px; font-weight: 600; color: var(--gold-dark);
+    text-transform: uppercase; letter-spacing: 1px;
+    margin-bottom: 6px; padding-bottom: 3px;
+    border-bottom: 1px solid var(--border);
+  }
+  .health-item {
+    display: flex; justify-content: space-between;
+    align-items: center; padding: 4px 0;
+    font-size: 10px; border-bottom: 1px solid rgba(255,255,255,0.02);
+  }
+  .health-item:last-child { border-bottom: none; }
+  .health-item-label { color: var(--text-dim); }
+  .health-item-val { font-weight: 600; }
+  .health-item-val.green { color: var(--green); }
+  .health-item-val.yellow { color: var(--yellow); }
+  .health-item-val.red { color: var(--red); }
+  .health-item-val.ok { color: var(--green); }
+  .health-item-val.fail { color: var(--red); }
+  .health-item-val.unknown { color: var(--text-dim); }
+
+  /* Click outside to close */
+  .health-panel-overlay {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    z-index: 9998; display: none;
+    background: rgba(0,0,0,0.3); backdrop-filter: blur(2px);
+  }
+  .health-panel-overlay.open { display: block; }
 
   /* PAGES */
   .page { display: none; padding: 8px 12px 16px; max-width: 1600px; margin: 0 auto; }
@@ -205,21 +290,336 @@
   .bot-dec-text { color: var(--text); }
   .bot-dec-reason { color: var(--text-dim); font-size: 8px; }
 
-  /* SERVICES */
-  .svc-table { width: 100%; font-size: 10px; border-collapse: collapse; }
+  /* SERVICES - Card Layout */
+  .svc-cards-container {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .svc-card {
+    background: rgba(255,255,255,0.02);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 8px 10px;
+    transition: all 0.3s ease;
+    animation: cardIn 0.3s ease backwards;
+  }
+  .svc-card:hover {
+    border-color: rgba(255,215,0,0.15);
+    background: rgba(255,255,255,0.04);
+  }
+  @keyframes cardIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .svc-card.off {
+    border-color: rgba(68,68,68,0.5);
+    background: rgba(68,68,68,0.08);
+  }
+  .svc-card.restarting {
+    border-color: var(--cyan);
+    background: rgba(0,212,255,0.03);
+    animation: restartingPulse 1.5s ease-in-out infinite;
+  }
+  @keyframes restartingPulse {
+    0%, 100% {
+      border-color: var(--cyan);
+      box-shadow: 0 0 4px rgba(0,212,255,0.1);
+    }
+    50% {
+      border-color: var(--cyan-dim);
+      box-shadow: 0 0 12px rgba(0,212,255,0.25);
+    }
+  }
+  .svc-card._changed {
+    animation: stateChange 0.6s ease;
+  }
+  @keyframes stateChange {
+    0%,100% { border-color: var(--border); }
+    25% { border-color: var(--gold); box-shadow: 0 0 12px rgba(255,215,0,0.15); }
+    50% { border-color: var(--cyan); box-shadow: 0 0 12px rgba(0,212,255,0.15); }
+  }
+
+  .svc-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+  }
+  .svc-name-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .svc-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .svc-dot.on {
+    background: var(--green);
+    box-shadow: 0 0 4px var(--green);
+  }
+  .svc-dot.off {
+    background: #444;
+  }
+  .svc-name {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .svc-scope {
+    font-size: 8px;
+    padding: 1px 4px;
+    border-radius: 2px;
+    background: rgba(255,255,255,0.05);
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .svc-badge {
+    font-size: 9px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 2px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    display: inline-block;
+    animation: badgePulse 2s ease-in-out infinite;
+  }
+  .svc-badge.running {
+    background: rgba(0,255,136,0.15);
+    color: var(--green);
+    border: 1px solid var(--green-dim);
+  }
+  .svc-badge.stopped {
+    background: rgba(68,68,68,0.2);
+    color: #666;
+    border: 1px solid #444;
+    animation: none;
+  }
+  .svc-badge.restarting {
+    background: rgba(0,212,255,0.15);
+    color: var(--cyan);
+    border: 1px solid var(--cyan-dim);
+    position: relative;
+    padding-left: 20px;
+  }
+  .svc-badge.restarting::before {
+    content: '';
+    position: absolute;
+    left: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 10px;
+    height: 10px;
+    border: 2px solid var(--cyan);
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spinner 0.8s linear infinite;
+  }
+  @keyframes spinner {
+    to { transform: translateY(-50%) rotate(360deg); }
+  }
+  @keyframes badgePulse {
+    0%,100% { opacity: 1; }
+    50% { opacity: 0.75; }
+  }
+
+  .svc-actions {
+    display: flex;
+    gap: 4px;
+  }
+  .log-toggle-btn {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 2px 6px;
+    border-radius: 2px;
+    cursor: pointer;
+    font-size: 9px;
+    font-family: inherit;
+    transition: all 0.25s ease;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .log-toggle-btn:hover {
+    border-color: var(--gold-dark);
+    color: var(--gold-light);
+  }
+  .log-toggle-btn.open {
+    background: rgba(0,212,255,0.1);
+    border-color: var(--cyan);
+    color: var(--cyan);
+  }
+  .restart-btn {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 2px 8px;
+    border-radius: 2px;
+    cursor: pointer;
+    font-size: 9px;
+    font-family: inherit;
+    transition: all 0.25s ease;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .restart-btn:hover {
+    border-color: var(--gold-dark);
+    color: var(--gold-light);
+    box-shadow: 0 0 6px rgba(255,215,0,0.08);
+  }
+  .restart-btn.spinning {
+    animation: spin 0.8s linear infinite;
+    color: var(--cyan);
+    border-color: var(--cyan);
+    background: rgba(0,212,255,0.08);
+    box-shadow: 0 0 8px rgba(0,212,255,0.15);
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .svc-meta {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 4px;
+    padding-top: 4px;
+    border-top: 1px solid rgba(255,255,255,0.03);
+  }
+  .svc-stat {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .svc-stat-key {
+    font-size: 8px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .svc-stat-val {
+    font-size: 9px;
+    color: var(--text-mid);
+    font-weight: 500;
+  }
+  .svc-stat-val.green { color: var(--green); }
+  .svc-stat-val.yellow { color: var(--yellow); }
+  .svc-stat-val.red { color: var(--red); }
+
+  .svc-logs {
+    display: none;
+    margin-top: 6px;
+    padding: 6px 8px;
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.05);
+    border-radius: 2px;
+    max-height: 200px;
+    overflow-y: auto;
+    animation: logsSlideIn 0.25s ease;
+  }
+  .svc-logs.open {
+    display: block;
+  }
+  @keyframes logsSlideIn {
+    from { opacity: 0; max-height: 0; }
+    to { opacity: 1; max-height: 200px; }
+  }
+  .svc-log-loading {
+    color: var(--text-dim);
+    font-size: 9px;
+    font-style: italic;
+    text-align: center;
+    padding: 8px 0;
+  }
+  .svc-log-line {
+    font-size: 9px;
+    padding: 2px 0;
+    line-height: 1.4;
+    border-bottom: 1px solid rgba(255,255,255,0.02);
+    word-break: break-all;
+  }
+  .svc-log-line:last-child {
+    border-bottom: none;
+  }
+  .svc-log-ts {
+    color: var(--text-dim);
+    font-size: 8px;
+    margin-right: 6px;
+  }
+  .svc-log-msg {
+    color: var(--text-mid);
+  }
+  .svc-log-line.error .svc-log-msg { color: var(--red); }
+  .svc-log-line.warn .svc-log-msg { color: var(--yellow); }
+  .svc-log-line.info .svc-log-msg { color: var(--cyan); }
+
+  /* Confirmation Modal */
+  .svc-confirm-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0,0,0,0.7);
+    backdrop-filter: blur(4px);
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: overlayIn 0.2s ease;
+  }
+  @keyframes overlayIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  .svc-confirm-box {
+    background: rgba(10,10,22,0.98);
+    border: 1px solid var(--gold);
+    border-radius: 4px;
+    padding: 16px 20px;
+    max-width: 400px;
+    width: 90%;
+    box-shadow: 0 8px 32px rgba(255,215,0,0.15);
+    animation: confirmSlideIn 0.3s cubic-bezier(0.34,1.56,0.64,1);
+  }
+  @keyframes confirmSlideIn {
+    from { opacity: 0; transform: translateY(-20px) scale(0.95); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .svc-confirm-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--gold-light);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 8px;
+  }
+  .svc-confirm-msg {
+    font-size: 10px;
+    color: var(--text);
+    margin-bottom: 12px;
+    line-height: 1.5;
+  }
+  .svc-confirm-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+  }
+  .svc-confirm-actions .ctrl-btn {
+    font-size: 9px;
+    padding: 4px 10px;
+  }
+
+  /* Legacy table styles (deprecated but kept for compatibility) */
+  .svc-table { width: 100%; font-size: 10px; border-collapse: collapse; display: none; }
   .svc-table th { text-align: left; color: var(--gold-dim); font-weight: 500; padding: 2px 8px; font-size: 8px; text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid var(--border); }
   .svc-table td { padding: 3px 8px; border-bottom: 1px solid rgba(255,255,255,0.02); }
   .svc-dot { display: inline-block; width: 5px; height: 5px; border-radius: 50%; vertical-align: middle; margin-right: 4px; }
   .svc-dot.on { background: var(--green); box-shadow: 0 0 3px var(--green); }
   .svc-dot.off { background: #333; }
-  .restart-btn {
-    background: none; border: 1px solid var(--border); color: var(--text-dim);
-    padding: 1px 6px; border-radius: 2px; cursor: pointer; font-size: 10px;
-    font-family: inherit; transition: all 0.25s ease;
-  }
-  .restart-btn:hover { border-color: var(--gold-dark); color: var(--gold-light); box-shadow: 0 0 6px rgba(255,215,0,0.08); }
-  .restart-btn.spinning { animation: spin 0.8s linear infinite; color: var(--cyan); }
-  @keyframes spin { to { transform: rotate(360deg); } }
 
   /* HERMES AGENT */
   .hermes-sub-grid { display: grid; grid-template-columns: 1fr 1.3fr 1.2fr; gap: 10px; }
@@ -342,6 +742,96 @@
   .ctrl-result.ok { background: rgba(0,255,136,0.1); border: 1px solid var(--green-dim); color: var(--green); }
   .ctrl-result.err { background: rgba(255,68,68,0.1); border: 1px solid var(--red-dim); color: var(--red); }
 
+  /* SETTINGS FORM */
+  .settings-page { max-width: 900px; margin: 0 auto; }
+  .settings-form { padding: 10px; }
+  .settings-groups { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 12px; }
+  .settings-group {
+    background: rgba(255,255,255,0.015); border: 1px solid var(--border); border-radius: 3px;
+    overflow: hidden;
+  }
+  .settings-group:hover { border-color: rgba(255,215,0,0.2); }
+  .settings-group-title {
+    padding: 6px 10px; background: rgba(255,215,0,0.08); border-bottom: 1px solid var(--border);
+    font-size: 11px; font-weight: 600; letter-spacing: 1px; color: var(--gold-light);
+    text-transform: uppercase;
+  }
+  .settings-group-body { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+  .settings-field { display: flex; flex-direction: column; gap: 3px; }
+  .settings-field label {
+    font-size: 9px; color: var(--text-mid); text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .settings-field input, .settings-field select {
+    padding: 5px 8px; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 2px; color: var(--text); font-family: inherit; font-size: 11px; outline: none;
+  }
+  .settings-field input:focus, .settings-field select:focus { border-color: var(--gold-dim); }
+  .settings-field input.invalid, .settings-field select.invalid {
+    border-color: var(--red); background: rgba(255,68,68,0.05);
+  }
+  .field-hint { font-size: 8px; color: var(--text-dim); margin-top: 2px; }
+  .settings-actions {
+    display: flex; gap: 8px; align-items: center; justify-content: space-between;
+    padding: 10px 0; border-top: 1px solid var(--border); margin-top: 10px;
+  }
+  .settings-actions-left { display: flex; gap: 8px; align-items: center; flex: 1; }
+  .settings-status { font-size: 11px; min-width: 200px; }
+  .settings-errors {
+    margin-top: 8px; padding: 8px; background: rgba(255,68,68,0.08);
+    border: 1px solid var(--red-dim); border-radius: 2px; display: none;
+  }
+  .settings-errors.show { display: block; }
+  .settings-errors ul { margin: 0 0 0 16px; padding: 0; }
+  .settings-errors li {
+    font-size: 10px; color: var(--red); margin: 2px 0;
+  }
+  .settings-restart-banner {
+    display: none; margin-top: 12px; padding: 10px;
+    background: rgba(255,215,0,0.1); border: 1px solid var(--gold);
+    border-radius: 3px; text-align: center;
+  }
+  .settings-restart-banner.show { display: block; animation: fadeIn 0.3s ease; }
+  .settings-restart-banner h4 {
+    margin: 0 0 6px 0; font-size: 12px; color: var(--gold-light);
+    text-transform: uppercase; letter-spacing: 1px;
+  }
+  .settings-restart-banner p { margin: 0 0 8px 0; font-size: 10px; color: var(--text); }
+  .settings-restart-btn {
+    padding: 5px 14px; background: var(--gold); border: none; border-radius: 2px;
+    color: #060610; font-family: inherit; font-size: 11px; font-weight: 600;
+    cursor: pointer; text-transform: uppercase; letter-spacing: 1px;
+    transition: all 0.25s ease;
+  }
+  .settings-restart-btn:hover {
+    background: var(--gold-light); box-shadow: 0 0 12px rgba(255,215,0,0.3);
+    transform: translateY(-1px);
+  }
+  .settings-restart-btn:active { transform: translateY(0); box-shadow: none; }
+  @keyframes fadeIn { from { opacity:0; transform: translateY(-5px); } to { opacity:1; transform: translateY(0); } }
+
+  /* SETTINGS LOADING */
+  .settings-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 30px 20px;
+    font-size: 11px;
+    color: var(--text-mid);
+  }
+  .settings-loading .live-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    background: var(--gold);
+    border-radius: 50%;
+    animation: pulse 1.5s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(0.8); }
+  }
+
   /* FOOTER */
   .footer {
     margin-top: 10px; padding: 5px 0; border-top: 1px solid var(--border-glow);
@@ -425,19 +915,36 @@
     <span class="topbar-logo">
       <img src="/static/hermes-logo.png" alt="Hermes" style="width:28px; height:28px; border-radius:4px; object-fit:contain;">
     </span>
-    <span class="topbar-brand">HERMES <span style="font-size:10px; opacity:0.5; letter-spacing:1px;">SERVER OPS</span></span>
+    <span class="topbar-brand">HERMES <span style="font-size:10px; opacity:0.5; letter-spacing:1px;">SERVER DASHBOARD</span></span>
     <nav class="topbar-nav">
       <button class="nav-btn active" data-page="dashboard" onclick="showPage('dashboard', this)">System</button>
       <button class="nav-btn" data-page="bot" onclick="showPage('bot', this)">Bot Trade</button>
       <button class="nav-btn" data-page="ops" onclick="showPage('ops', this)">Operations</button>
       <button class="nav-btn" data-page="logs" onclick="showPage('logs', this)">Logs</button>
       <button class="nav-btn" data-page="graficos" onclick="showPage('graficos', this)">Charts</button>
+      <button class="nav-btn" data-page="settings" onclick="showPage('settings', this)">⚙️ Settings</button>
     </nav>
   </div>
   <div class="topbar-right">
     <span id="hostname-top">---</span>
     <span>·</span>
     <span class="live-badge"><span class="live-dot"></span>LIVE</span>
+    <span class="health-badge" id="health-badge" onclick="toggleHealthPanel()">
+      <span class="health-dot green" id="health-dot"></span>
+      <span class="health-label green" id="health-label">HEALTHY</span>
+    </span>
+  </div>
+</div>
+
+<!-- HEALTH DETAIL PANEL -->
+<div class="health-panel-overlay" id="health-overlay" onclick="toggleHealthPanel()"></div>
+<div class="health-panel" id="health-panel">
+  <div class="health-panel-header">
+    <span class="health-panel-title">System Health</span>
+    <button class="health-panel-close" onclick="toggleHealthPanel()">×</button>
+  </div>
+  <div class="health-panel-body" id="health-panel-body">
+    <!-- Populated by JavaScript -->
   </div>
 </div>
 
@@ -572,10 +1079,7 @@
     <div class="panel c34">
       <div class="panel-hdr"><span>SERVICES & CONTROLS</span><span class="hdr-dot" id="svc-dot"></span></div>
       <div class="panel-body">
-        <table class="svc-table">
-          <thead><tr><th>SERVICE</th><th>STATUS</th><th>PID</th><th>MEM</th><th>CPU</th><th>ACTION</th></tr></thead>
-          <tbody id="svc-tbody"></tbody>
-        </table>
+        <div id="svc-cards"></div>
       </div>
     </div>
 
@@ -682,9 +1186,29 @@
       <div id="ops-action-result" style="padding:6px 10px; font-size:9px;"></div>
     </div>
 
+    <!-- Network Scanner -->
+    <div class="panel c14">
+      <div class="panel-hdr">
+        <span>📡 NETWORK SCANNER</span>
+        <span style="display:flex; align-items:center; gap:8px;">
+          <button id="btn-scan-now" onclick="forceScan()" style="background:var(--cyan); color:var(--bg); border:none; border-radius:3px; padding:2px 10px; font-size:9px; cursor:pointer; font-weight:600; letter-spacing:0.5px;">⟳ SCAN NOW</button>
+          <span id="scanner-status" class="status-badge status-off" style="font-size:9px;">Scanning...</span>
+        </span>
+      </div>
+      <div class="panel-body">
+        <div id="devices-grid" class="devices-grid">
+          <div class="retro-text retro-dim" style="font-size:10px;">Initializing scanner...</div>
+        </div>
+        <div id="scanner-error" class="retro-text retro-red" style="display:none; font-size:10px;"></div>
+        <div style="margin-top:8px; padding-top:6px; border-top:1px solid var(--border); text-align:center; font-size:9px; color:var(--text-dim);">
+          Auto-refresh: 60s | Refreshed: <span id="last-refresh">--</span>
+        </div>
+      </div>
+    </div>
+
     <!-- Hermes Agent Info -->
     <div class="panel c14">
-      <div class="panel-hdr"><span>📡 HERMES AGENT</span><span class="hdr-dot" id="hermes-dot-ops"></span></div>
+      <div class="panel-hdr"><span>🤖 HERMES AGENT</span><span class="hdr-dot" id="hermes-dot-ops"></span></div>
       <div class="panel-body">
         <div id="hermes-info-ops" style="font-size:10px;">Loading...</div>
         <div style="margin-top:8px">
@@ -787,6 +1311,50 @@
   </div>
 </div>
 
+
+<!-- PAGE: SETTINGS -->
+<div id="page-settings" class="page">
+  <div class="main-grid">
+    <div class="panel c12">
+      <div class="panel-hdr"><span>⚙ CONFIGURAÇÕES</span><span class="hdr-dot"></span></div>
+      <div class="panel-body">
+        <!-- Loading indicator -->
+        <div id="settings-loading" class="settings-loading">
+          <span class="live-dot"></span> Carregando configurações...
+        </div>
+
+        <!-- Form -->
+        <div id="settings-form" style="display:none;">
+          <!-- Groups container -->
+          <div id="settings-groups" style="display:none;"></div>
+
+          <!-- Actions bar -->
+          <div id="settings-actions-bar" style="display:none; margin-top:20px; padding-top:20px; border-top:1px solid var(--border);">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <div>
+                <button class="ctrl-btn" onclick="saveSettings()">💾 SALVAR</button>
+                <button class="ctrl-btn" onclick="resetSettings()">🔄 RESTAURAR</button>
+              </div>
+              <div style="text-align:right;">
+                <div id="settings-status" style="font-size:9px; color:var(--text-dim);"></div>
+                <div id="settings-restart-banner" style="display:none; margin-top:8px; padding:8px; background:rgba(255,215,0,0.1); border:1px solid var(--gold-dim); border-radius:3px; color:var(--gold);">
+                  <span style="color:var(--gold-light); font-weight:600;">⚠ Configuração salva!</span> O dashboard será reiniciado. Deseja reiniciar agora?
+                  <div style="margin-top:6px; display:flex; gap:8px; justify-content:flex-end;">
+                    <button class="ctrl-btn" style="color:var(--text); background:transparent;" onclick="document.getElementById('settings-restart-banner').style.display='none'">Agora não</button>
+                    <button class="ctrl-btn" onclick="restartDashboard()">🔄 Reiniciar Dashboard</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Error container -->
+        <div id="settings-errors" style="display:none; margin-top:10px; padding:10px; background:rgba(255,68,68,0.1); border:1px solid var(--red-dim); border-radius:3px; color:var(--red); font-size:9px;"></div>
+      </div>
+    </div>
+  </div>
+</div>
 <!-- FOOTER -->
 <div class="footer">
   <div id="footer-info">---</div>
@@ -819,6 +1387,92 @@ async function cachedFetch(url, ttlMs=3000) {
     return d;
   } catch(e) { return entry?.data || null; }
 }
+
+// ===== NETWORK SCANNER =====
+const DEVICE_ICONS = { PC:'🖥️', PHONE:'📱', IOT:'🔌', SERVER:'🖥️', ROUTER:'📡', PRINTER:'🖨️', UNKNOWN:'❓' };
+let _scannerDevices = [];
+let _scannerError = null;
+
+function formatMAC(mac) {
+  if (!mac || mac === 'N/A') return 'N/A';
+  return mac.toUpperCase();
+}
+
+function renderDevices() {
+  const grid = document.getElementById('devices-grid');
+  const errorDiv = document.getElementById('scanner-error');
+  const statusDiv = document.getElementById('scanner-status');
+  const lastRefresh = document.getElementById('last-refresh');
+  if (!grid) return;
+
+  if (_scannerError) {
+    errorDiv.textContent = _scannerError;
+    errorDiv.style.display = 'block';
+    statusDiv.className = 'status-badge status-off';
+    statusDiv.textContent = 'Error';
+    return;
+  }
+  if (_scannerDevices.length === 0) {
+    grid.innerHTML = '<div style="font-size:10px; color:var(--text-dim);">No devices found</div>';
+    statusDiv.className = 'status-badge status-off';
+    statusDiv.textContent = 'No devices';
+    return;
+  }
+
+  // Sort: SERVER first, then ROUTER, then by hostname
+  const typeOrder = { SERVER:0, ROUTER:1, PC:2, PHONE:3, IOT:4, UNKNOWN:5 };
+  _scannerDevices.sort((a,b) => (typeOrder[a.type]||9) - (typeOrder[b.type]||9) || (a.hostname||'').localeCompare(b.hostname||''));
+
+  let html = '<div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:6px;">';
+  _scannerDevices.forEach(d => {
+    const icon = DEVICE_ICONS[d.type] || DEVICE_ICONS.UNKNOWN;
+    const sc = d.online ? 'status-on' : 'status-off';
+    const st = d.online ? 'ONLINE' : 'OFFLINE';
+    const name = d.hostname || d.ip;
+    const vendor = d.vendor ? `<div style="font-size:9px; color:var(--text-dim); opacity:0.7;">${d.vendor}</div>` : '';
+    html += `<div style="border:1px solid var(--border); border-radius:4px; padding:8px 10px; background:var(--bg-panel); transition:background 0.2s;" onmouseover="this.style.background='var(--bg-panel-hover)'" onmouseout="this.style.background='var(--bg-panel)'">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+        <span style="font-weight:600; font-size:11px; display:flex; align-items:center; gap:4px;">${icon} ${name}</span>
+        <span class="status-badge ${sc}" style="font-size:8px;">${st}</span>
+      </div>
+      <div style="font-size:10px; color:var(--text-dim);">IP: ${d.ip}</div>
+      <div style="font-size:10px; color:var(--text-dim);">MAC: ${formatMAC(d.mac)}</div>
+      ${vendor}
+    </div>`;
+  });
+  html += '</div>';
+  grid.innerHTML = html;
+  statusDiv.className = 'status-badge status-on';
+  statusDiv.textContent = `${_scannerDevices.length} device(s)`;
+  lastRefresh.textContent = new Date().toLocaleTimeString();
+}
+
+
+async function fetchDevices() {
+  try {
+    const r = await fetch('/api/network-scanner/devices');
+    const d = await r.json();
+    if (d.error) { _scannerError = d.error; } else { _scannerError = null; _scannerDevices = d.devices || []; }
+  } catch(e) { _scannerError = 'Failed to fetch: ' + e.message; }
+  renderDevices();
+}
+
+async function forceScan() {
+  const btn = document.getElementById('btn-scan-now');
+  const statusDiv = document.getElementById('scanner-status');
+  btn.disabled = true; btn.style.opacity = '0.5'; btn.textContent = '⏳ SCANNING...';
+  statusDiv.className = 'status-badge status-off'; statusDiv.textContent = 'Scanning...';
+  try {
+    const r = await fetch('/api/network-scanner/scan', {method:'POST'});
+    const d = await r.json();
+    if (d.error) { _scannerError = d.error; } else { _scannerError = null; _scannerDevices = d.devices || []; }
+  } catch(e) { _scannerError = 'Scan failed: ' + e.message; }
+  renderDevices();
+  btn.disabled = false; btn.style.opacity = '1'; btn.textContent = '⟳ SCAN NOW';
+}
+
+fetchDevices();
+setInterval(fetchDevices, 60000);
 
 // ===== UTILS =====
 function gauge(pct, len=10) {
@@ -1011,6 +1665,8 @@ function showPage(name, btn) {
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('page-' + name).classList.add('active');
   if (btn) btn.classList.add('active');
+  // Lazy-load settings on first visit
+  if (name === 'settings' && !_settingsSchema) loadSettings();
 }
 
 // ===== POLLING =====
@@ -1109,37 +1765,218 @@ function renderNeofetch(d) {
   if (d.uptime) document.getElementById('nf-uptime').textContent = d.uptime;
 }
 
+// Track previous states for change detection
+const _svcPrevState = {};
+
 function renderServices(services) {
-  const tbody = document.getElementById('svc-tbody');
-  tbody.innerHTML = '';
-  if (!services || !services.length) { tbody.innerHTML = '<tr><td colspan="6" style="color:var(--text-dim)">No services</td></tr>'; return; }
-  const wl = ['hermes-gateway','binance-bot','server-dashboard'];
+  const container = document.getElementById('svc-cards');
+  if (!container) return;
+  if (!services || !services.length) {
+    container.innerHTML = '<div style="color:var(--text-dim); font-size:10px; font-style:italic; text-align:center; padding:16px 0;">No services configured</div>';
+    return;
+  }
+
+  // Check if any service changed state → animate
   services.forEach(svc => {
-    const tr = document.createElement('tr');
-    const on = svc.active==='active'||svc.active===true;
-    tr.innerHTML =
-      '<td><span class="svc-dot ' + (on?'on':'off') + '"></span>' + svc.name + '</td>' +
-      '<td style="color:' + (on?'var(--green)':'#555') + '">' + (on?'● RUNNING':'○ STOPPED') + '</td>' +
-      '<td>' + (svc.pid||'—') + '</td>' +
-      '<td>' + (svc.memory||'—') + '</td>' +
-      '<td>' + (svc.cpu||'—') + '</td>' +
-      '<td>' + (wl.includes(svc.name)
-        ? '<button class="restart-btn" data-name="' + svc.name + '" onclick="restartService(this)">↻</button>'
-        : '<span style="color:var(--text-dim)">—</span>') + '</td>';
-    tbody.appendChild(tr);
+    const key = svc.service;
+    const wasActive = _svcPrevState[key];
+    const isActive = svc.active === true || svc.active === 'active';
+    if (wasActive !== undefined && wasActive !== isActive) {
+      svc._changed = true;
+    }
+    _svcPrevState[key] = isActive;
+  });
+
+  container.innerHTML = services.map((svc, idx) => {
+    const on = svc.active === true || svc.active === 'active';
+    const restarting = _svcRestarting[svc.service];
+    const stateClass = restarting ? 'restarting' : (on ? '' : 'off');
+    const badgeClass = restarting ? 'restarting' : (on ? 'running' : 'stopped');
+    const badgeText = restarting ? '⟳ RESTARTING' : (on ? '● RUNNING' : '○ STOPPED');
+    const pid = svc.pid || '—';
+    const mem = svc.memory || '—';
+    const cpu = svc.cpu || '—';
+    const uptime = svc.uptime || '—';
+    const scope = svc.scope || 'system';
+
+    const restartBtn = svc.allow_restart
+      ? `<button class="restart-btn ${restarting ? 'spinning' : ''}" data-svc="${esc(svc.service)}" data-display="${esc(svc.name)}" onclick="confirmRestart(this)" ${restarting ? 'disabled' : ''}>${restarting ? '⟳ RESTARTING' : '↻ RESTART'}</button>`
+      : '';
+
+    return `<div class="svc-card ${stateClass}" data-svc-key="${esc(svc.service)}" style="animation-delay:${idx * 50}ms">
+      <div class="svc-top">
+        <div class="svc-name-group">
+          <span class="svc-dot ${on ? 'on' : 'off'}"></span>
+          <span class="svc-name">${esc(svc.name)}</span>
+          <span class="svc-scope">${esc(scope)}</span>
+        </div>
+        <span class="svc-badge ${badgeClass}">${badgeText}</span>
+        <div class="svc-actions">
+          <button class="log-toggle-btn" data-svc="${esc(svc.service)}" onclick="toggleServiceLogs(this)">▤ LOGS</button>
+          ${restartBtn}
+        </div>
+      </div>
+      <div class="svc-meta">
+        <div class="svc-stat"><span class="svc-stat-key">PID</span><span class="svc-stat-val">${pid}</span></div>
+        <div class="svc-stat"><span class="svc-stat-key">MEM</span><span class="svc-stat-val mem">${mem}</span></div>
+        <div class="svc-stat"><span class="svc-stat-key">CPU</span><span class="svc-stat-val cpu">${cpu}</span></div>
+        <div class="svc-stat"><span class="svc-stat-key">UPTIME</span><span class="svc-stat-val uptime">${uptime}</span></div>
+      </div>
+      <div class="svc-logs" id="svc-logs-${esc(svc.service)}"></div>
+    </div>`;
+  }).join('');
+
+  // Update header dot
+  const anyDown = services.some(s => !(s.active === true || s.active === 'active'));
+  const dot = document.getElementById('svc-dot');
+  if (dot) dot.className = 'hdr-dot' + (anyDown ? ' off' : '');
+
+  // Store uptime timestamps for incremental updates
+  S.lastServicesTimestamp = Date.now();
+}
+
+// Update only uptime values without full re-render (runs every 60s)
+function updateServiceUptimes() {
+  const now = Date.now();
+  if (!S.lastServicesTimestamp || !S.lastServices) return;
+
+  const elapsedSeconds = Math.floor((now - S.lastServicesTimestamp) / 1000);
+
+  S.lastServices.forEach(svc => {
+    // Only update uptime for active services
+    if (svc.active !== true && svc.active !== 'active') return;
+    if (!svc.uptime || svc.uptime === '—') return;
+
+    // Find the uptime element and update it
+    const card = document.querySelector(`.svc-card[data-svc-key="${esc(svc.service)}"]`);
+    if (!card) return;
+
+    const uptimeEl = card.querySelector('.uptime');
+    if (!uptimeEl) return;
+
+    // Parse current uptime and add elapsed time
+    try {
+      // Parse uptime string like "2d 14h 32m" or "5m 23s"
+      const parts = svc.uptime.split(' ');
+      let totalSeconds = 0;
+
+      for (const part of parts) {
+        if (part.endsWith('d')) {
+          totalSeconds += parseInt(part) * 86400;
+        } else if (part.endsWith('h')) {
+          totalSeconds += parseInt(part) * 3600;
+        } else if (part.endsWith('m')) {
+          totalSeconds += parseInt(part) * 60;
+        } else if (part.endsWith('s')) {
+          totalSeconds += parseInt(part);
+        }
+      }
+
+      totalSeconds += elapsedSeconds;
+
+      // Format back to string
+      const days = Math.floor(totalSeconds / 86400);
+      const hours = Math.floor((totalSeconds % 86400) / 3600);
+      const minutes = Math.floor((totalSeconds % 3600) / 60);
+      const seconds = totalSeconds % 60;
+
+      let uptimeStr = '';
+      if (days > 0) uptimeStr += days + 'd ';
+      if (hours > 0 || days > 0) uptimeStr += hours + 'h ';
+      if (minutes > 0 || hours > 0 || days > 0) uptimeStr += minutes + 'm';
+      else uptimeStr += seconds + 's';
+
+      uptimeEl.textContent = uptimeStr.trim();
+      svc.uptime = uptimeStr.trim(); // Update stored value
+    } catch (e) {
+      // If parsing fails, skip update
+    }
+  });
+
+  S.lastServicesTimestamp = now;
+}
+
+// Track services currently restarting
+const _svcRestarting = {};
+
+function confirmRestart(btn) {
+  const svcName = btn.getAttribute('data-svc');
+  const displayName = btn.getAttribute('data-display') || svcName;
+  // Create confirmation modal
+  const overlay = document.createElement('div');
+  overlay.className = 'svc-confirm-overlay';
+  overlay.innerHTML = `
+    <div class="svc-confirm-box">
+      <div class="svc-confirm-title">⚠ RESTART SERVICE</div>
+      <div class="svc-confirm-msg">Restart <strong style="color:var(--gold-light)">${esc(displayName)}</strong>? This will cause a brief interruption in service.</div>
+      <div class="svc-confirm-actions">
+        <button class="ctrl-btn" onclick="this.closest('.svc-confirm-overlay').remove()">CANCEL</button>
+        <button class="ctrl-btn danger" id="confirm-restart-btn" data-svc="${esc(svcName)}">⚡ RESTART NOW</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  // Close on overlay click
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  // Wire confirm button
+  document.getElementById('confirm-restart-btn').addEventListener('click', function() {
+    overlay.remove();
+    doServiceRestart(this.getAttribute('data-svc'));
   });
 }
 
-async function restartService(btn) {
-  const name = btn.getAttribute('data-name');
-  btn.classList.add('spinning'); btn.disabled = true;
+async function doServiceRestart(svcName) {
+  _svcRestarting[svcName] = true;
+  renderServices(S.lastServices || []);
   try {
-    const r = await fetch('/api/service/' + name + '/restart', {method:'POST'});
+    const r = await fetch('/api/service/' + svcName + '/restart', {method: 'POST'});
     const d = await r.json();
-    showToast(d.success ? name + ' restarted' : 'Failed: ' + name, d.success?'success':'error');
-    setTimeout(fetchServices, 3000);
-  } catch(e) { showToast('Error: ' + e.message, 'error'); }
-  setTimeout(() => { btn.classList.remove('spinning'); btn.disabled = false; }, 5000);
+    showToast(d.success ? svcName + ' restarted successfully' : 'Failed: ' + (d.message || svcName), d.success ? 'success' : 'error');
+  } catch(e) {
+    showToast('Error restarting ' + svcName + ': ' + e.message, 'error');
+  }
+  // Wait for service to come back up
+  setTimeout(() => {
+    delete _svcRestarting[svcName];
+    fetchServices();
+  }, 5000);
+}
+
+async function toggleServiceLogs(btn) {
+  const svcName = btn.getAttribute('data-svc');
+  const logsEl = document.getElementById('svc-logs-' + svcName);
+  if (!logsEl) return;
+
+  const isOpen = logsEl.classList.contains('open');
+  if (isOpen) {
+    logsEl.classList.remove('open');
+    btn.classList.remove('open');
+    return;
+  }
+
+  // Open and load logs
+  btn.classList.add('open');
+  logsEl.classList.add('open');
+  logsEl.innerHTML = '<div class="svc-log-loading">Loading logs...</div>';
+
+  try {
+    const r = await fetch('/api/services/logs/' + svcName + '?lines=15');
+    const d = await r.json();
+    if (d.error) {
+      logsEl.innerHTML = '<div class="svc-log-line error"><span class="svc-log-msg">Error: ' + esc(d.error) + '</span></div>';
+      return;
+    }
+    const lines = d.lines || [];
+    if (!lines.length) {
+      logsEl.innerHTML = '<div class="svc-log-loading">No recent logs</div>';
+      return;
+    }
+    logsEl.innerHTML = lines.map(l => {
+      return `<div class="svc-log-line ${l.level || 'info'}"><span class="svc-log-ts">${esc(l.ts || '')}</span><span class="svc-log-msg">${esc(l.msg || '')}</span></div>`;
+    }).join('');
+    logsEl.scrollTop = logsEl.scrollHeight;
+  } catch(e) {
+    logsEl.innerHTML = '<div class="svc-log-line error"><span class="svc-log-msg">Failed to load logs</span></div>';
+  }
 }
 
 function renderHermes(d) {
@@ -1668,6 +2505,38 @@ async function loadGraficos() {
   }
 }
 
+// ===== FEATURE FLAGS =====
+async function applyFeatureFlags() {
+  try {
+    const r = await fetch('/api/features');
+    const f = await r.json();
+    // Hide Bot Trade tab if no bot configured
+    if (!f.has_bot && !f.has_bot_service) {
+      document.querySelectorAll('[data-page="bot"]').forEach(el => el.style.display = 'none');
+      document.getElementById('page-bot')?.style && (document.getElementById('page-bot').style.display = 'none');
+    }
+    // Hide BitsyMiner charts if not configured
+    if (!f.has_bitsy) {
+      document.querySelectorAll('.chart-title').forEach(el => {
+        if (el.textContent.includes('BitsyMiner')) el.closest('.chart-box')?.remove();
+      });
+    }
+    // Hide bot-specific quick actions
+    if (!f.has_bot_service) {
+      document.querySelectorAll('.ctrl-btn').forEach(el => {
+        if (el.textContent.includes('RESTART BOT') || el.textContent.includes('STOP BOT')) el.style.display = 'none';
+      });
+    }
+    // Hide bot-specific log tabs
+    if (!f.has_bot_service) {
+      document.querySelectorAll('.ctrl-btn').forEach(el => {
+        if (el.textContent.includes('BINANCE BOT')) el.style.display = 'none';
+      });
+    }
+  } catch(e) { console.warn('Feature flags failed:', e); }
+}
+applyFeatureFlags();
+
 // ===== INIT =====
 fetchMetrics(); fetchNeofetch(); fetchDocker(); fetchConnections(); fetchServices(); fetchHermes(); fetchBot();
 loadModels(); loadOpsHermes();
@@ -1686,6 +2555,7 @@ setInterval(loadModels, 30000);
 setInterval(loadOpsHermes, 20000);
 setInterval(loadGraficos, 60000);
 setInterval(loadKanban, 15000);
+setInterval(updateServiceUptimes, 60000); // Update uptime every 60s
 
 async function loadKanban() {
   try {
@@ -1695,7 +2565,7 @@ async function loadKanban() {
     const cnt = document.getElementById('kanban-count');
     const tasks = d.tasks || [];
     const counts = d.counts || {};
-    const totalActive = (counts.in_progress || 0) + (counts.pending || 0) + (counts.triage || 0);
+    const totalActive = (counts.in_progress || 0) + (counts.pending || 0) + (counts.triage || 0) + (counts.running || 0);
     cnt.textContent = totalActive;
     if (!tasks.length) {
       el.innerHTML = '<div class="kanban-empty">✓ No active tasks</div>';
@@ -1704,14 +2574,16 @@ async function loadKanban() {
     el.innerHTML = tasks.map(t => {
       const prio = (t.priority || 0) >= 5 ? 'high' : (t.priority || 0) >= 2 ? 'medium' : 'low';
       const isTriage = t.status === 'triage';
+      const isRunning = t.status === 'running';
       const triageTag = isTriage ? '<span class="badge" style="background:rgba(255,165,0,0.15);color:#ffa500">TRIAGE</span>' : '';
+      const runningTag = isRunning ? '<span class="badge" style="background:rgba(0,212,255,0.15);color:var(--cyan)">RUNNING</span>' : '';
       const step = t.current_step_key ? `<span class="badge">${t.current_step_key}</span>` : '';
       const skills = t.skills ? `<span class="badge">${t.skills.split(',')[0].trim()}</span>` : '';
       const started = t.started_at ? new Date(t.started_at * 1000).toLocaleTimeString('en-US', {hour:'2-digit',minute:'2-digit'}) : '';
       const body = t.body ? t.body.substring(0, 80) + (t.body.length > 80 ? '…' : '') : '';
       return `<div class="kanban-item priority-${prio}${isTriage ? ' status-triage' : ''}">
         <div class="kanban-title">${esc(t.title)}</div>
-        <div class="kanban-meta">${triageTag}${started ? '⏱ ' + started : ''}${step}${skills}</div>
+        <div class="kanban-meta">${triageTag}${runningTag}${started ? '⏱ ' + started : ''}${step}${skills}</div>
         ${body ? `<div style="font-size:8px;color:#666;line-height:1.3;margin-top:1px">${esc(body)}</div>` : ''}
       </div>`;
     }).join('');
@@ -1800,6 +2672,8 @@ async function loadSettings() {
 
     loading.style.display = 'none';
     form.style.display = 'block';
+    document.getElementById('settings-groups').style.display = 'grid';
+    document.getElementById('settings-actions-bar').style.display = 'flex';
     document.getElementById('settings-status').textContent = 'Loaded at ' + new Date().toLocaleTimeString();
 
   } catch(e) {
@@ -1841,6 +2715,7 @@ async function saveSettings() {
         errDiv.innerHTML = '<ul class="settings-error-list">' +
           data.errors.map(e => '<li>' + esc(e) + '</li>').join('') + '</ul>';
         errDiv.style.display = 'block';
+        errDiv.classList.add('show');
         // Mark invalid fields
         for (const input of inputs) {
           input.classList.remove('invalid');
@@ -1859,11 +2734,12 @@ async function saveSettings() {
     // Success
     status.textContent = '✓ Saved at ' + new Date().toLocaleTimeString() + ' (backup: ' + (data.backup || 'N/A') + ')';
     status.style.color = 'var(--green)';
-    toast('Settings saved successfully!', 'success');
+    showToast('Settings saved successfully!', 'success');
 
     // Show restart banner
     if (data.restart_required) {
       banner.style.display = 'block';
+      banner.classList.add('show');
     }
 
     // Reload to reflect changes
@@ -1887,7 +2763,7 @@ async function restartDashboard() {
     if (data.success) {
       msg.textContent = '✓ Restart command sent. This page will reconnect shortly...';
       msg.style.color = 'var(--green)';
-      toast('Dashboard restarting...', 'info');
+      showToast('Dashboard restarting...', 'info');
       // Try to reconnect after 5s
       setTimeout(() => {
         msg.textContent = 'Attempting to reconnect...';
@@ -1897,7 +2773,7 @@ async function restartDashboard() {
               clearInterval(check);
               msg.textContent = '✓ Dashboard is back online!';
               msg.style.color = 'var(--green)';
-              toast('Dashboard restarted successfully!', 'success');
+              showToast('Dashboard restarted successfully!', 'success');
             }
           }).catch(() => {});
         }, 2000);
@@ -1915,6 +2791,187 @@ async function restartDashboard() {
 }
 
 function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+// ===== HEALTH BADGE =====
+let healthInterval = null;
+let isHealthPanelOpen = null;
+let lastHealthData = null;  // cache API response
+
+async function updateHealthBadge() {
+  try {
+    const data = await fetch('/api/health').then(r => r.json());
+    const { state, system, connections } = data;
+    lastHealthData = data;  // cache for panel
+    
+    const dot = document.getElementById('health-dot');
+    const label = document.getElementById('health-label');
+    
+    // Reset classes
+    dot.className = 'health-dot';
+    label.className = 'health-label';
+    
+    // Update based on state
+    switch(state) {
+      case 'green':
+        dot.classList.add('green');
+        label.classList.add('green');
+        label.textContent = 'HEALTHY';
+        break;
+      case 'yellow':
+        dot.classList.add('yellow');
+        label.classList.add('yellow');
+        label.textContent = 'WARNING';
+        break;
+      case 'red':
+        dot.classList.add('red');
+        label.classList.add('red');
+        label.textContent = 'CRITICAL';
+        break;
+    }
+    
+    // Populate panel if open
+    if (isHealthPanelOpen) {
+      renderHealthPanel(system, connections);
+    }
+  } catch(e) {
+    console.error('Health update failed:', e);
+  }
+}
+
+function renderHealthPanel(system, connections) {
+  const body = document.getElementById('health-panel-body');
+  
+  // System metrics
+  let html = `
+    <div class="health-section">
+      <div class="health-section-title">System Resources</div>
+      <div class="health-item">
+        <span class="health-item-label">CPU</span>
+        <span class="health-item-val ${system.cpu.percent >= 70 ? 'yellow' : system.cpu.percent >= 85 ? 'red' : 'green'}">
+          ${system.cpu.percent.toFixed(1)}%
+        </span>
+      </div>
+      <div class="health-item">
+        <span class="health-item-label">Memory</span>
+        <span class="health-item-val ${system.memory.percent >= 80 ? 'yellow' : system.memory.percent >= 90 ? 'red' : 'green'}">
+          ${system.memory.percent.toFixed(1)}%
+        </span>
+      </div>
+      <div class="health-item">
+        <span class="health-item-label">Disk</span>
+        <span class="health-item-val ${system.disk.percent >= 85 ? 'yellow' : system.disk.percent >= 95 ? 'red' : 'green'}">
+          ${system.disk.percent.toFixed(1)}%
+        </span>
+      </div>
+      <div class="health-item">
+        <span class="health-item-label">Swap</span>
+        <span class="health-item-val">${system.swap.percent.toFixed(1)}%</span>
+      </div>
+    </div>
+  `;
+  
+  // Connections
+  html += `
+    <div class="health-section">
+      <div class="health-section-title">Connections</div>
+  `;
+  
+  // Internet
+  const internet = connections.internet;
+  html += `
+    <div class="health-item">
+      <span class="health-item-label">Internet</span>
+      <span class="health-item-val ${internet.reachable ? 'green' : 'red'}">
+        ${internet.reachable ? 'OK' : 'FAIL'} (${internet.latency_ms}ms)
+      </span>
+    </div>
+  `;
+  
+  // DNS
+  const dns = connections.dns;
+  html += `
+    <div class="health-item">
+      <span class="health-item-label">DNS</span>
+      <span class="health-item-val ${dns.reachable ? 'green' : 'red'}">
+        ${dns.reachable ? 'OK' : 'FAIL'} (${dns.latency_ms}ms)
+      </span>
+    </div>
+  `;
+  
+  // Cloudflare Tunnel
+  const cloudflare = connections.cloudflare;
+  html += `
+    <div class="health-item">
+      <span class="health-item-label">Cloudflare Tunnel</span>
+      <span class="health-item-val ${cloudflare.running ? 'green' : 'red'}">
+        ${cloudflare.running ? 'Running' : 'Stopped'}
+      </span>
+    </div>
+  `;
+  
+  // Hermes Gateway
+  const hermes = connections.hermes_gateway;
+  html += `
+    <div class="health-item">
+      <span class="health-item-label">Hermes Gateway</span>
+      <span class="health-item-val ${hermes.reachable ? 'green' : 'red'}">
+        ${hermes.reachable ? 'Active' : 'Inactive'}
+      </span>
+    </div>
+  `;
+  
+  // Binance Bot
+  const bot = connections.binance_bot;
+  html += `
+    <div class="health-item">
+      <span class="health-item-label">Binance Bot</span>
+      <span class="health-item-val ${bot.reachable ? 'green' : 'red'}">
+        ${bot.reachable ? 'Connected' : 'Disconnected'}
+      </span>
+    </div>
+  `;
+  
+  html += `</div>`;
+  
+  body.innerHTML = html;
+}
+
+function toggleHealthPanel() {
+  const panel = document.getElementById('health-panel');
+  const overlay = document.getElementById('health-overlay');
+  
+  isHealthPanelOpen = !isHealthPanelOpen;
+  
+  if (isHealthPanelOpen) {
+    panel.classList.add('open');
+    overlay.classList.add('open');
+    // Use cached health data, or fetch fresh
+    if (lastHealthData) {
+      renderHealthPanel(lastHealthData.system, lastHealthData.connections);
+    } else {
+      document.getElementById('health-panel-body').innerHTML = '<div style="padding:20px; text-align:center; color:var(--text-dim);">Loading...</div>';
+      updateHealthBadge().then(() => {
+        if (lastHealthData) renderHealthPanel(lastHealthData.system, lastHealthData.connections);
+      });
+    }
+  } else {
+    panel.classList.remove('open');
+    overlay.classList.remove('open');
+  }
+}
+
+// Initialize health badge
+function initHealthBadge() {
+  updateHealthBadge();
+  healthInterval = setInterval(updateHealthBadge, 30000); // Poll every 30s
+}
+
+// Start health monitoring on page load
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initHealthBadge);
+} else {
+  initHealthBadge();
+}
 </script>
 </body>
 </html>

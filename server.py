@@ -567,13 +567,15 @@ def get_services() -> list[dict]:
             active_enter = props.get("ActiveEnterTimestamp", "")
             if active_enter and active:
                 try:
-                    # systemd timestamp format: "Day YYYY-MM-DD HH:MM:SS TZ"
-                    # Use monotonic fallback: parse the timestamp
-                    # Try strptime for common format
+                    # systemd timestamp format: "Sat 2026-05-09 21:35:16 -03"
+                    # Need to normalize the timezone part
                     from datetime import datetime as _dt
                     ts_str = active_enter.strip()
-                    # systemd format: "Fri 2026-05-09 14:35:22 -03"
-                    # Try multiple formats
+                    # systemd often outputs TZ like "-03" instead of "-03:00"
+                    # Fix: replace trailing " +/-HH" with proper offset
+                    tz_match = re.search(r'\s+([+-])(\d{2})$', ts_str)
+                    if tz_match:
+                        ts_str = ts_str[:tz_match.start()] + ' ' + tz_match.group(1) + tz_match.group(2) + '00'
                     for fmt in (
                         "%a %Y-%m-%d %H:%M:%S %z",
                         "%a %Y-%m-%d %H:%M:%S",
@@ -587,10 +589,10 @@ def get_services() -> list[dict]:
                         except ValueError:
                             continue
                     else:
-                        # Last resort: try direct parse
+                        # Last resort: strip TZ and parse
                         try:
-                            import dateutil.parser
-                            enter_dt = dateutil.parser.parse(ts_str)
+                            clean = re.sub(r'\s+[+-]\d{2,4}$', '', ts_str)
+                            enter_dt = _dt.strptime(clean.strip(), "%a %Y-%m-%d %H:%M:%S")
                             uptime_seconds = time.time() - enter_dt.timestamp()
                         except Exception:
                             pass
@@ -854,6 +856,14 @@ async def index():
         return FileResponse(html_path)
     return HTMLResponse("<h1>Dashboard not built yet</h1>")
 
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    ico_path = STATIC_DIR / "favicon.ico"
+    if ico_path.exists():
+        return FileResponse(ico_path, media_type="image/x-icon")
+    return Response(status_code=404)
+
+
 # Serve static assets (logo, images, etc.)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
@@ -883,7 +893,7 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
                         "load": [0.75, 0.82, 0.91],
                         "cpu_temp": 52.0,
                         "network": {"rx_rate": 125000, "tx_rate": 42000, "rx_total": 10737418240, "tx_total": 5368709120},
-                        "hostname": "linuxmint",
+                        "hostname": "your-hostname",
                         "os": "Linux 6.17.0-23-generic",
                         "timestamp": "2026-05-09T21:30:00.000000",
                         "sparklines": {"cpu": "▃▄▃▂▅▃▂▁▃▄", "temp": "▃▃▄▃▃▃▂▃▄▃", "net_rx": "▁▂▁▁▂▃▁▁▁▂", "net_tx": "▁▁▁▁▁▂▁▁▁▁"},
@@ -913,7 +923,30 @@ async def metrics():
 
 KANBAN_DB = str(HERMES_HOME / "kanban.db")
 
-@app.get("/api/kanban")
+@app.get(
+    "/api/kanban",
+    tags=["Hermes"],
+    summary="Active kanban tasks",
+    description=(
+        "Queries the local Hermes kanban SQLite database for in-progress and triage tasks, "
+        "plus status counts for all non-archived tasks. Used by the HERMES panel in the dashboard."
+    ),
+    responses={
+        200: {
+            "description": "Kanban task list and status counts",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "tasks": [
+                            {"id": "t_abc123", "title": "Polish API docs", "status": "in_progress", "priority": 2, "assignee": "default"}
+                        ],
+                        "counts": {"todo": 3, "in_progress": 1, "done": 42, "triage": 0},
+                    }
+                }
+            },
+        }
+    },
+)
 async def kanban_tasks():
     """Return in-progress kanban tasks from the local DB."""
     try:
@@ -925,7 +958,7 @@ async def kanban_tasks():
             SELECT id, title, status, priority, assignee, created_at, started_at,
                    workspace_kind, body, skills, current_step_key, workflow_template_id
             FROM tasks
-            WHERE status IN ('in_progress', 'triage')
+            WHERE status IN ('in_progress', 'triage', 'running')
             ORDER BY
               CASE status WHEN 'in_progress' THEN 0 WHEN 'triage' THEN 1 END,
               priority DESC, created_at DESC
@@ -941,37 +974,392 @@ async def kanban_tasks():
         return {"tasks": [], "counts": {}, "error": str(e)}
 
 
-@app.get("/api/neofetch")
+@app.get(
+    "/api/neofetch",
+    tags=["System"],
+    summary="System information",
+    description="Returns ASCII-styled system info (OS, kernel, uptime, packages, shell, resolution, DE, WM, theme, icons, terminal, CPU, GPU, Memory). TTL-cached (30s).",
+    responses={
+        200: {
+            "description": "Neofetch ASCII system information",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "os": "Linux Mint 22 Wilma",
+                        "kernel": "6.17.0-23-generic",
+                        "uptime": "12 days, 5 hours, 30 minutes",
+                        "packages": "3421 (apt)",
+                        "shell": "zsh 5.9",
+                        "resolution": "1920x1080",
+                        "de": "Cinnamon 6.2",
+                        "terminal": "kitty",
+                        "cpu": "Intel Core i7-8550U (8) @ 4.00GHz",
+                        "memory": "15724MiB"
+                    }
+                }
+            },
+        }
+    },
+)
 async def neofetch():
     return _cached("neofetch", 30, get_neofetch)
 
 
-@app.get("/api/docker")
+@app.get(
+    "/api/docker",
+    tags=["System"],
+    summary="Docker containers",
+    description="Lists all Docker containers with status, image, ports, and uptime. Returns empty list if Docker is not installed or not running. TTL-cached (10s).",
+    responses={
+        200: {
+            "description": "Docker container list",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "containers": [
+                            {
+                                "id": "abc123def456",
+                                "name": "nginx-proxy",
+                                "status": "running",
+                                "image": "nginx:latest",
+                                "ports": "80:80, 443:443",
+                                "uptime": "5d 3h"
+                            }
+                        ]
+                    }
+                }
+            },
+        }
+    },
+)
 async def docker_info():
     return _cached("docker", 10, get_docker)
 
 
-@app.get("/api/connections")
+@app.get(
+    "/api/connections",
+    tags=["System"],
+    summary="Network connectivity checks",
+    description="Performs connectivity tests to external services (Google DNS, Cloudflare, configured URLs) and reports latency, status, and DNS resolution. TTL-cached (15s).",
+    responses={
+        200: {
+            "description": "Connectivity test results",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "google_dns": {"host": "8.8.8.8", "status": "ok", "latency_ms": 12.3},
+                        "cloudflare": {"host": "1.1.1.1", "status": "ok", "latency_ms": 15.7},
+                        "gateway": {"host": "192.168.1.1", "status": "ok", "latency_ms": 2.1},
+                        "timestamp": "2026-05-09T21:30:00.000000"
+                    }
+                }
+            },
+        }
+    },
+)
 async def connections():
     return _cached("connections", 15, get_connections)
 
 
-@app.get("/api/temps")
+@app.get(
+    "/api/system",
+    tags=["System"],
+    summary="Base system metrics",
+    description="Returns CPU, memory, swap, disk, temperatures, network, uptime, load, hostname, and OS info without cached service/hermes data. TTL-cached (30s).",
+    responses={
+        200: {
+            "description": "System metrics snapshot",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "cpu": {"percent": 12.5, "freq": {"current": 3200}, "count_logical": 8, "count_physical": 4, "model": "Intel Core i7-8550U"},
+                        "memory": {"total": 16777216000, "used": 6442450000, "available": 10334766000, "percent": 38.4, "cached": 2100000000},
+                        "swap": {"total": 4294967296, "used": 0, "percent": 0.0},
+                        "disk": {"total": 500107862016, "used": 245366878208, "free": 254740983808, "percent": 49.1, "mount": "/"},
+                        "uptime": "12d 5h 30m",
+                        "uptime_seconds": 1056600,
+                        "load": [0.75, 0.82, 0.91],
+                        "cpu_temp": 52.0,
+                        "network": {"rx_rate": 125000, "tx_rate": 42000, "rx_total": 10737418240, "tx_total": 5368709120},
+                        "hostname": "your-hostname",
+                        "os": "Linux 6.17.0-23-generic"
+                    }
+                }
+            },
+        }
+    },
+)
+async def system_metrics():
+    return _cached("system_metrics", 30, get_system_metrics)
+
+
+@app.get(
+    "/api/features",
+    tags=["Config"],
+    summary="Feature flags from config",
+    description="Returns which features are enabled based on config.yaml. Frontend uses this to show/hide sections dynamically.",
+)
+async def get_features():
+    integrations = CFG.get("integrations", {})
+    services = [s["name"] for s in CFG.get("services", [])]
+    return {
+        "has_bot": bool(integrations.get("bot_api_url")),
+        "has_bitsy": bool(integrations.get("bitsy_url")),
+        "has_bot_service": "binance-bot" in services,
+        "has_network_scanner": True,  # plugin-based, always available
+        "services": services,
+    }
+
+
+@app.get(
+    "/api/temps",
+    tags=["System"],
+    summary="Hardware temperatures",
+    description="Returns CPU, GPU, and other hardware temperatures and fan speeds from lm-sensors. TTL-cached (5s).",
+    responses={
+        200: {
+            "description": "Temperature readings",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "temps": {
+                            "Package id 0": 52.0,
+                            "Core 0": 48.0,
+                            "Core 1": 50.0
+                        },
+                        "fan": {
+                            "fan1": 1200,
+                            "cpu_fan": 1500
+                        }
+                    }
+                }
+            },
+        }
+    },
+)
 async def temps():
     return _cached("temps", 5, get_temperatures)
 
 
-@app.get("/api/services")
+@app.get(
+    "/api/services",
+    tags=["Services"],
+    summary="Monitored services status",
+    description="Returns status (running, failed, inactive) and uptime for all services configured in config.yaml. TTL-cached (10s).",
+    responses={
+        200: {
+            "description": "Service status list",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "services": [
+                            {"name": "hermes-gateway", "status": "running", "uptime": "12d 5h 30m", "enabled": True, "allow_restart": True},
+                            {"name": "binance-bot", "status": "running", "uptime": "5d 2h 15m", "enabled": True, "allow_restart": True},
+                            {"name": "watchdog", "status": "inactive", "enabled": False, "allow_restart": False}
+                        ]
+                    }
+                }
+            },
+        }
+    },
+)
 async def services():
     return _cached("services", 10, get_services)
 
+# Build a lookup for service_key → (scope, service_name) for log fetching
+def _build_service_log_lookup():
+    """Build service key → (scope, full_service_name) map from config."""
+    lookup = {}
+    for svc in CFG.get("services", []):
+        name = svc["name"]
+        scope = svc.get("scope", "system")
+        svc_name = f"{name}.service" if not name.endswith(".service") else name
+        # Allow lookup by short name (without .service)
+        lookup[name] = (scope, svc_name)
+        # Also allow with .service suffix
+        if name != svc_name:
+            lookup[svc_name] = (scope, svc_name)
+    return lookup
 
-@app.get("/api/hermes")
+
+@app.get(
+    "/api/services/logs/{service_key}",
+    tags=["Services"],
+    summary="Service logs",
+    description="Fetch tail logs from journalctl for a specific configured service. Parses log lines into structured format with timestamps, messages, and log levels (error/warn/info). Supports both user and system services.",
+    responses={
+        200: {
+            "description": "Service log entries",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "service": "hermes-gateway",
+                        "lines": [
+                            {"ts": "14:20:30", "msg": "Starting worker for task t_abc123", "level": "info"},
+                            {"ts": "14:20:32", "msg": "Task completed successfully", "level": "info"},
+                            {"ts": "14:20:35", "msg": "Connection timeout to API", "level": "error"}
+                        ],
+                        "count": 3
+                    }
+                }
+            },
+        },
+        400: {"description": "Service not configured"},
+        500: {"description": "Failed to fetch logs"},
+    },
+)
+async def service_logs(service_key: str, lines: int = 20):
+    """Fetch tail logs for a specific configured service."""
+    lookup = _build_service_log_lookup()
+    if service_key not in lookup:
+        return JSONResponse({"error": f"Service '{service_key}' not configured"}, status_code=400)
+
+    scope, svc_name = lookup[service_key]
+    try:
+        if scope == "user":
+            env = _user_env()
+            # Use JSON output to filter by unit
+            cmd = f"journalctl --user --no-pager -n {min(lines * 5, 500)} --output=json"
+            result = subprocess.run(
+                ["bash", "-c", cmd],
+                capture_output=True, text=True, timeout=8, env=env
+            )
+            filtered = []
+            for line in result.stdout.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    import json as _json
+                    entry = _json.loads(line)
+                    unit = entry.get("_SYSTEMD_USER_UNIT", "")
+                    if unit == svc_name:
+                        ts = entry.get("__REALTIME_TIMESTAMP", "")
+                        msg = entry.get("MESSAGE", "")
+                        priority = entry.get("PRIORITY", "6")
+                        if ts:
+                            try:
+                                from datetime import datetime as _dt, timezone as _tz
+                                ts_str = _dt.fromtimestamp(int(ts) / 1_000_000, tz=_tz.utc).strftime("%H:%M:%S")
+                            except Exception:
+                                ts_str = ""
+                        else:
+                            ts_str = ""
+                        # Priority: 0=emerg, 1=alert, 2=crit, 3=err, 4=warn, 5=notice, 6=info, 7=debug
+                        level = "error" if int(priority) <= 3 else "warn" if int(priority) == 4 else "info"
+                        filtered.append({"ts": ts_str, "msg": msg[:200], "level": level})
+                except Exception:
+                    pass
+            return {"service": service_key, "lines": filtered[-lines:], "count": len(filtered)}
+
+        else:
+            # System service
+            cmd = f"journalctl -u {svc_name} --no-pager -n {lines} --output=short-iso"
+            if SUDO_MODE == "sudo_password" and SUDO_PASSWORD:
+                result = subprocess.run(
+                    ["bash", "-c", f"echo '{SUDO_PASSWORD}' | sudo -S {cmd}"],
+                    capture_output=True, text=True, timeout=8
+                )
+            elif SUDO_MODE == "sudo_nopasswd":
+                result = subprocess.run(
+                    ["bash", "-c", f"sudo -n {cmd}"],
+                    capture_output=True, text=True, timeout=8
+                )
+            else:
+                result = subprocess.run(
+                    ["bash", "-c", cmd],
+                    capture_output=True, text=True, timeout=8
+                )
+            parsed = []
+            for line in result.stdout.splitlines():
+                if not line.strip():
+                    continue
+                # Parse short-iso: "2026-05-09T14:20:30-03:00 HOSTNAME ..."
+                parts = None
+                m = re.match(r"^(\d{4}-\d{2}-\d{2}T(\d{2}:\d{2}:\d{2}))[^\s]*\s+\S+\s+(.*)", line)
+                if m:
+                    ts = m.group(2)
+                    msg = m.group(3)[:200]
+                else:
+                    ts = ""
+                    msg = line[:200]
+                level = "error" if any(k in line.lower() for k in ["error", "critical", "fatal", "exception", "traceback"]) else \
+                        "warn" if "warn" in line.lower() else "info"
+                parsed.append({"ts": ts, "msg": msg, "level": level})
+            return {"service": service_key, "lines": parsed[-lines:], "count": len(parsed)}
+
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get(
+    "/api/hermes",
+    tags=["Hermes"],
+    summary="Hermes agent status",
+    description="Returns Hermes Agent configuration, current model, provider, platform connections (Telegram, Discord), active sessions, recent runs, and cron job status. Reads from ~/.hermes/ config and kanban SQLite DB. TTL-cached (15s).",
+    responses={
+        200: {
+            "description": "Hermes agent status",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "model": "glm-5.1",
+                        "provider": "zai",
+                        "platforms": {
+                            "telegram": {"connected": True, "chat_id": "6436594324"},
+                            "discord": {"connected": False}
+                        },
+                        "sessions": {
+                            "active": 2,
+                            "recent": [{"id": "session_abc123", "model": "glm-5.1", "started_at": "2026-05-09T14:20:00"}]
+                        },
+                        "cron_jobs": {
+                            "enabled": 3,
+                            "last_run": "2026-05-09T14:15:00"
+                        },
+                        "config_path": "/home/pantojinho/.hermes/config.yaml"
+                    }
+                }
+            },
+        }
+    },
+)
 async def hermes_status():
     return _cached("hermes", 15, get_hermes_status)
 
 
-@app.post("/api/service/{name}/restart")
+@app.post(
+    "/api/service/{name}/restart",
+    tags=["Services"],
+    summary="Restart a service",
+    description="Restart a configured systemd service. The service must be in config.yaml with allow_restart: True. Supports user services (systemctl --user) and system services (requires sudo_mode configuration).",
+    responses={
+        200: {
+            "description": "Service restarted successfully",
+            "content": {
+                "application/json": {
+                    "example": {"success": True, "message": "hermes-gateway restarted"}
+                }
+            },
+        },
+        400: {
+            "description": "Service not allowed or sudo not configured",
+            "content": {
+                "application/json": {
+                    "example": {"success": False, "message": "Service 'nginx' not allowed"}
+                }
+            },
+        },
+        500: {
+            "description": "Restart failed",
+            "content": {
+                "application/json": {
+                    "example": {"success": False, "message": "Job failed. See systemctl status for details."}
+                }
+            },
+        },
+    },
+)
 async def restart_service(name: str):
     if name not in ALLOWED_RESTART_SERVICES:
         return JSONResponse({"success": False, "message": f"Service '{name}' not allowed"}, status_code=400)
@@ -1014,7 +1402,30 @@ async def restart_service(name: str):
         )
 
 
-@app.get("/bot-api/{path:path}")
+@app.get(
+    "/bot-api/{path:path}",
+    tags=["Hermes"],
+    summary="Proxy to trading bot API",
+    description="Reverse proxy to the trading bot API configured in config.yaml (bot_api_url). Forwards all GET requests and returns JSON or text responses. Used by dashboard to fetch bot metrics, trades, and P&L without CORS issues. TTL-cached (4s).",
+    responses={
+        200: {
+            "description": "Bot API response (JSON or text)",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "status": "trading",
+                        "regime": "ALTA",
+                        "daily_pnl": 0.0234,
+                        "equity": 1.0234,
+                        "trades_today": 5,
+                        "last_trade": {"symbol": "BTCUSDT", "side": "BUY", "price": 67500.50}
+                    }
+                }
+            },
+        },
+        503: {"description": "Bot API unavailable"},
+    },
+)
 async def proxy_bot(path: str, request: Request):
     """Proxy to Binance bot API."""
     import requests as req_lib
@@ -1032,7 +1443,36 @@ async def proxy_bot(path: str, request: Request):
 
 # ── Hermes Model & Ops Endpoints ─────────────────────────────────────
 
-@app.get("/api/hermes/models")
+@app.get(
+    "/api/hermes/models",
+    tags=["Hermes"],
+    summary="Available AI models",
+    description="Lists available AI models from Hermes config.yaml. Returns current model, provider, and a list of available models (custom + common suggestions). Used by dashboard model switcher.",
+    responses={
+        200: {
+            "description": "Available models",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "current": "glm-5.1",
+                        "provider": "zai",
+                        "models": [
+                            "glm-5.1",
+                            "glm-5",
+                            "gemma4-e4b-oblit",
+                            "gemma4-nothink",
+                            "kimi-k2-2.6",
+                            "gemini-2.5-pro",
+                            "gemini-2.5-flash",
+                            "deepseek-r1",
+                            "claude-sonnet-4-20250514"
+                        ]
+                    }
+                }
+            },
+        }
+    },
+)
 async def hermes_models():
     """Lista modelos disponíveis lendo do config.yaml."""
     import yaml
@@ -1068,7 +1508,23 @@ async def hermes_models():
         return {"current": "unknown", "provider": "zai", "models": ["glm-5.1"], "error": str(e)}
 
 
-@app.post("/api/hermes/model")
+@app.post(
+    "/api/hermes/model",
+    tags=["Hermes"],
+    summary="Switch AI model",
+    description="Updates the default AI model in ~/.hermes/config.yaml and restarts the Hermes gateway service to apply changes. Accepts JSON body with 'model' and optional 'provider' fields.",
+    responses={
+        200: {
+            "description": "Model switched successfully",
+            "content": {
+                "application/json": {
+                    "example": {"success": True, "model": "glm-5.1", "provider": "zai"}
+                }
+            },
+        },
+        500: {"description": "Failed to update config or restart gateway"},
+    },
+)
 async def set_hermes_model(request: Request):
     """Troca modelo no config.yaml e reinicia o gateway."""
     import yaml
@@ -1100,7 +1556,23 @@ async def set_hermes_model(request: Request):
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
 
 
-@app.post("/api/backup")
+@app.post(
+    "/api/backup",
+    tags=["Hermes"],
+    summary="Create config backup",
+    description="Creates a timestamped backup of essential Hermes config files (config.yaml, MEMORY.md, USER.md, PERSONA.md, skills/) and Binance bot config files. Automatically cleans up old backups (max_copies setting, default 10).",
+    responses={
+        200: {
+            "description": "Backup created successfully",
+            "content": {
+                "application/json": {
+                    "example": {"success": True, "path": "/home/pantojinho/backups/hermes_20260509_143025", "timestamp": "20260509_143025"}
+                }
+            },
+        },
+        500: {"description": "Failed to create backup"},
+    },
+)
 async def backup_config():
     """Faz backup das configs essenciais do Hermes e bot."""
     import shutil
@@ -1140,7 +1612,31 @@ async def backup_config():
 
 # ── Metrics / Graficos API ────────────────────────────────────────
 
-@app.get("/api/logs/{service}")
+@app.get(
+    "/api/logs/{service}",
+    tags=["Services"],
+    summary="Service logs (fast reader)",
+    description="Fast journalctl log reader for dashboard tabs. Supports predefined services: hermes (gateway), bot (binance-bot), dashboard (server-dashboard), watchdog. Returns structured log lines with timestamps and messages.",
+    responses={
+        200: {
+            "description": "Log entries",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "service": "hermes",
+                        "lines": [
+                            {"ts": "14:20:30", "msg": "Starting worker for task t_abc123", "level": "info"},
+                            {"ts": "14:20:32", "msg": "Task completed successfully", "level": "info"}
+                        ],
+                        "count": 2
+                    }
+                }
+            },
+        },
+        400: {"description": "Invalid service name"},
+        500: {"description": "Failed to fetch logs"},
+    },
+)
 async def get_logs(service: str, lines: int = 80):
     """Fast journalctl log reader for the dashboard."""
     allowed = {
@@ -1242,7 +1738,28 @@ async def get_logs(service: str, lines: int = 80):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
-@app.get("/api/graficos/series")
+@app.get(
+    "/api/graficos/series",
+    tags=["Metrics"],
+    summary="Time-series data for a metric",
+    description="Query time-series data from SQLite TSDB for a specific metric over a duration. Returns [timestamp_ms, value] pairs suitable for Chart.js. Supports optional tag filtering.",
+    responses={
+        200: {
+            "description": "Time-series data points",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "metric": "system_cpu_percent",
+                        "duration": 3600,
+                        "data": [[1715289000000, 12.5], [1715289060000, 13.2], [1715289120000, 11.8]],
+                        "points": 3
+                    }
+                }
+            },
+        },
+        500: {"description": "Failed to query TSDB"},
+    },
+)
 async def graficos_series(
     metric: str = "system_cpu_percent",
     duration: int = 3600,
@@ -1268,7 +1785,31 @@ async def graficos_series(
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
-@app.get("/api/graficos/series_tagged")
+@app.get(
+    "/api/graficos/series_tagged",
+    tags=["Metrics"],
+    summary="Time-series data grouped by tag",
+    description="Query time-series data grouped by a tag value (e.g., CPU cores, GPU devices). Returns multiple series where keys are tag values and values are [timestamp_ms, value] pairs.",
+    responses={
+        200: {
+            "description": "Grouped time-series data",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "metric": "system_cpu_core_percent",
+                        "duration": 3600,
+                        "series": {
+                            "0": [[1715289000000, 12.5], [1715289060000, 13.2]],
+                            "1": [[1715289000000, 11.0], [1715289060000, 12.1]],
+                            "2": [[1715289000000, 10.5], [1715289060000, 11.8]]
+                        }
+                    }
+                }
+            },
+        },
+        500: {"description": "Failed to query TSDB"},
+    },
+)
 async def graficos_series_tagged(
     metric: str = "system_cpu_core_percent",
     duration: int = 3600,
@@ -1287,10 +1828,47 @@ async def graficos_series_tagged(
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
-@app.get("/api/graficos/dashboard")
+@app.get(
+    "/api/graficos/dashboard",
+    tags=["Metrics"],
+    summary="All chart data for dashboard",
+    description="Returns all time-series data needed for the Graficos tab in a single request. Includes system metrics (CPU, memory, disk, etc.), BitsyMiner metrics, bot metrics, and TSDB status. Optimized for one-call loading of all charts.",
+    responses={
+        200: {
+            "description": "Complete dashboard chart data",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "duration": 3600,
+                        "generated_at": "2026-05-09T14:30:00.000000",
+                        "system": {
+                            "cpu": [[1715289000000, 12.5], [1715289060000, 13.2]],
+                            "memory": [[1715289000000, 38.4], [1715289060000, 39.1]],
+                            "disk": [[1715289000000, 49.1], [1715289060000, 49.2]]
+                        },
+                        "bitsy": {
+                            "hashrate": [[1715289000000, 777], [1715289060000, 780]],
+                            "shares": [[1715289000000, 123], [1715289060000, 124]]
+                        },
+                        "bot": {
+                            "pnl": [[1715289000000, 0.0234], [1715289060000, 0.0251]],
+                            "equity": [[1715289000000, 1.0234], [1715289060000, 1.0251]]
+                        },
+                        "status": {
+                            "db_size_mb": 12.5,
+                            "collector_running": True,
+                            "points_total": 125000
+                        }
+                    }
+                }
+            },
+        },
+        500: {"description": "Failed to query TSDB"},
+    },
+)
 async def graficos_dashboard(duration: int = 3600):
     """
-    Return all metrics needed for the Graficos tab in one request.
+    Return all metrics needed for Graficos tab in one request.
     """
     try:
         conn = metrics_tsdb.get_db()
@@ -1357,7 +1935,38 @@ async def graficos_dashboard(duration: int = 3600):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
-@app.get("/api/graficos/status")
+@app.get(
+    "/api/graficos/status",
+    tags=["Metrics"],
+    summary="TSDB collector status",
+    description="Returns the status of the time-series database collector: running state, database path and size, total data points, oldest/newest timestamps, list of collected metrics, and scrape interval.",
+    responses={
+        200: {
+            "description": "TSDB status",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "collector_running": True,
+                        "db_path": "/home/pantojinho/server-dashboard/metrics.db",
+                        "db_size_mb": 12.5,
+                        "total_points": 125000,
+                        "oldest": "2026-05-08T14:30:00",
+                        "newest": "2026-05-09T14:30:00",
+                        "metrics": [
+                            "system_cpu_percent",
+                            "system_memory_percent",
+                            "system_disk_percent",
+                            "bitsy_hashrate_khs",
+                            "bot_daily_pnl"
+                        ],
+                        "scrape_interval": 30
+                    }
+                }
+            },
+        },
+        500: {"description": "Failed to query TSDB status"},
+    },
+)
 async def graficos_status():
     """Return TSDB collector status."""
     try:
@@ -1384,7 +1993,33 @@ async def graficos_status():
 
 # ── Plugin API ────────────────────────────────────────────────────────
 
-@app.get("/api/plugins")
+@app.get(
+    "/api/plugins",
+    tags=["Plugins"],
+    summary="List loaded plugins",
+    description="Returns metadata for all loaded dashboard plugins: name, display name, tab ID, whether they have a tab UI, routes, and metric collector.",
+    responses={
+        200: {
+            "description": "Plugin list",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "plugins": [
+                            {
+                                "name": "my-plugin",
+                                "display_name": "MY PLUGIN",
+                                "tab_id": "my-plugin-tab",
+                                "has_tab": True,
+                                "has_routes": True,
+                                "has_collector": False
+                            }
+                        ]
+                    }
+                }
+            },
+        }
+    },
+)
 async def list_plugins():
     """List all loaded plugins with their metadata."""
     return {
@@ -1403,7 +2038,28 @@ async def list_plugins():
     }
 
 
-@app.get("/api/plugins/{name}/tab")
+@app.get(
+    "/api/plugins/{name}/tab",
+    tags=["Plugins"],
+    summary="Plugin tab HTML",
+    description="Returns the HTML content for a specific plugin's tab, along with any custom JavaScript and CSS styles. Used by dashboard to load plugin UI dynamically.",
+    responses={
+        200: {
+            "description": "Plugin tab HTML",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "name": "my-plugin",
+                        "html": "<div class='panel'>Hello from plugin!</div>",
+                        "scripts": "<script>console.log('Plugin loaded');</script>",
+                        "styles": "<style>.plugin-panel { background: red; }</style>"
+                    }
+                }
+            },
+        },
+        404: {"description": "Plugin not found or has no tab"},
+    },
+)
 async def plugin_tab(name: str):
     """Return a specific plugin's tab HTML content."""
     for p in _loaded_plugins:
@@ -1413,6 +2069,418 @@ async def plugin_tab(name: str):
                 return {"name": name, "html": html, "scripts": p.scripts_html(), "styles": p.styles_html()}
             return JSONResponse({"error": f"Plugin '{name}' has no tab"}, status_code=404)
     return JSONResponse({"error": f"Plugin '{name}' not found"}, status_code=404)
+
+
+
+# ── Settings API (in-browser config editor) ────────────────────────
+
+SETTINGS_BACKUP_DIR = DASHBOARD_DIR / "backups"
+
+
+def _deep_merge(base: dict, override: dict) -> dict:
+    """Merge override into base recursively. Returns new dict."""
+    result = base.copy()
+    for k, v in override.items():
+        if k in result and isinstance(result[k], dict) and isinstance(v, dict):
+            result[k] = _deep_merge(result[k], v)
+        else:
+            result[k] = v
+    return result
+
+
+# Schema definition for the settings form — defines which config fields are editable
+# and their types, labels, groups, validation rules.
+SETTINGS_SCHEMA = [
+    {
+        "group": "Server",
+        "icon": "🖥️",
+        "fields": [
+            {"key": "server.host", "label": "Host", "type": "text", "placeholder": "0.0.0.0"},
+            {"key": "server.port", "label": "Port", "type": "number", "min": 1, "max": 65535, "placeholder": "18791"},
+            {"key": "server.log_level", "label": "Log Level", "type": "select", "options": ["debug", "info", "warning", "error", "critical"]},
+        ],
+    },
+    {
+        "group": "Metrics",
+        "icon": "📊",
+        "fields": [
+            {"key": "metrics.scrape_interval", "label": "Scrape Interval (s)", "type": "number", "min": 5, "max": 600},
+            {"key": "metrics.retention_days", "label": "Retention Days", "type": "number", "min": 1, "max": 365},
+            {"key": "metrics.history_length", "label": "History Length", "type": "number", "min": 10, "max": 500},
+        ],
+    },
+    {
+        "group": "Alerts",
+        "icon": "🚨",
+        "fields": [
+            {"key": "alerts.cpu_temp_celsius", "label": "CPU Temp Alert (°C)", "type": "number", "min": 40, "max": 110},
+            {"key": "alerts.cpu_percent", "label": "CPU Usage Alert (%)", "type": "number", "min": 50, "max": 100},
+            {"key": "alerts.disk_percent", "label": "Disk Usage Alert (%)", "type": "number", "min": 50, "max": 100},
+        ],
+    },
+    {
+        "group": "Integrations",
+        "icon": "🔗",
+        "fields": [
+            {"key": "integrations.bot_api_url", "label": "Bot API URL", "type": "text", "placeholder": "http://localhost:18790/api"},
+            {"key": "integrations.bitsy_url", "label": "BitsyMiner URL", "type": "text", "placeholder": "http://192.168.1.132/statusJson"},
+        ],
+    },
+    {
+        "group": "Backup",
+        "icon": "💾",
+        "fields": [
+            {"key": "backup.directory", "label": "Backup Directory", "type": "text", "placeholder": "~/backups"},
+            {"key": "backup.max_copies", "label": "Max Backup Copies", "type": "number", "min": 1, "max": 100},
+        ],
+    },
+    {
+        "group": "Sudo",
+        "icon": "🔑",
+        "fields": [
+            {"key": "sudo_mode", "label": "Sudo Mode", "type": "select", "options": ["none", "sudo_password", "sudo_nopasswd"]},
+        ],
+    },
+    {
+        "group": "Hermes",
+        "icon": "🤖",
+        "fields": [
+            {"key": "integrations.telegram.enabled", "label": "Telegram Alerts", "type": "select", "options": ["true", "false"]},
+        ],
+    },
+]
+
+
+def _get_nested(d: dict, key_path: str, default=None):
+    """Get a nested dict value from dot-separated key path."""
+    keys = key_path.split(".")
+    val = d
+    for k in keys:
+        if isinstance(val, dict):
+            val = val.get(k, default)
+        else:
+            return default
+    return val
+
+
+def _set_nested(d: dict, key_path: str, value):
+    """Set a nested dict value using dot-separated key path."""
+    keys = key_path.split(".")
+    current = d
+    for k in keys[:-1]:
+        if k not in current or not isinstance(current[k], dict):
+            current[k] = {}
+        current = current[k]
+    current[keys[-1]] = value
+
+
+@app.get(
+    "/api/settings",
+    tags=["System"],
+    summary="Get dashboard settings",
+    description="Returns current config.yaml values and the editable schema for the in-browser settings form. Values are extracted from the config and matched to schema fields.",
+    responses={
+        200: {
+            "description": "Settings values and schema",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "values": {
+                            "server.port": 18791,
+                            "server.host": "0.0.0.0",
+                            "sudo_mode": "sudo_nopasswd"
+                        },
+                        "schema": [
+                            {
+                                "title": "Server",
+                                "fields": [
+                                    {"key": "server.port", "type": "number", "label": "Port", "default": 18791},
+                                    {"key": "server.host", "type": "text", "label": "Host", "default": "0.0.0.0"}
+                                ]
+                            }
+                        ]
+                    }
+                }
+            },
+        },
+        500: {"description": "Failed to read config"},
+    },
+)
+async def get_settings():
+    """Return current config values and the editable schema."""
+    cfg_path = DASHBOARD_DIR / "config.yaml"
+    try:
+        if cfg_path.exists():
+            with open(cfg_path) as f:
+                current = yaml.safe_load(f) or {}
+        else:
+            current = {}
+        # Build values from schema
+        values = {}
+        for group in SETTINGS_SCHEMA:
+            for field in group["fields"]:
+                key = field["key"]
+                val = _get_nested(current, key, "")
+                # Convert booleans to strings for select fields
+                if field.get("type") == "select" and isinstance(val, bool):
+                    val = "true" if val else "false"
+                values[key] = val
+        return {"values": values, "schema": SETTINGS_SCHEMA}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post(
+    "/api/settings",
+    tags=["System"],
+    summary="Save dashboard settings",
+    description="Updates config.yaml with new settings values, validates against schema, creates automatic backup, and marks dashboard for restart. Accepts JSON body with 'values' object containing nested key-value pairs.",
+    responses={
+        200: {
+            "description": "Settings saved successfully",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "success": True,
+                        "message": "Settings saved successfully",
+                        "backup": "config.yaml.backup_20260509_143025",
+                        "restart_required": True
+                    }
+                }
+            },
+        },
+        400: {"description": "Validation error"},
+        500: {"description": "Failed to save config"},
+    },
+)
+async def save_settings(request: Request):
+    """Save config with backup, validation, and optional restart."""
+    import shutil
+    body = await request.json()
+    new_values = body.get("values", {})
+
+    cfg_path = DASHBOARD_DIR / "config.yaml"
+
+    # 1. Load current config
+    try:
+        if cfg_path.exists():
+            with open(cfg_path) as f:
+                current = yaml.safe_load(f) or {}
+        else:
+            current = {}
+    except Exception as e:
+        return JSONResponse({"success": False, "error": f"Failed to read config: {e}"}, status_code=500)
+
+    # 2. Validate new values
+    errors = []
+    for group in SETTINGS_SCHEMA:
+        for field in group["fields"]:
+            key = field["key"]
+            if key not in new_values:
+                continue
+            val = new_values[key]
+            ftype = field.get("type", "text")
+
+            if ftype == "number":
+                try:
+                    val = float(val) if val != "" else 0
+                    if val != int(val):
+                        pass  # allow floats
+                    val_num = val
+                    if "min" in field and val_num < field["min"]:
+                        errors.append(f"{field['label']}: value {val} is below minimum {field['min']}")
+                    if "max" in field and val_num > field["max"]:
+                        errors.append(f"{field['label']}: value {val} exceeds maximum {field['max']}")
+                except (ValueError, TypeError):
+                    errors.append(f"{field['label']}: '{val}' is not a valid number")
+
+            if ftype == "select":
+                # Normalize booleans to string "true"/"false"
+                if isinstance(val, bool):
+                    val = "true" if val else "false"
+                    new_values[key] = val
+                str_val = str(val).lower() if isinstance(val, bool) else str(val)
+                if str_val not in field.get("options", []):
+                    errors.append(f"{field['label']}: '{val}' is not a valid option")
+
+            if ftype == "text" and "key" in field:
+                # Sanitize — no newlines, reasonable length
+                val = str(val).strip()[:200]
+                new_values[key] = val
+
+    if errors:
+        return JSONResponse({"success": False, "errors": errors}, status_code=400)
+
+    # 3. Create backup
+    SETTINGS_BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_path = SETTINGS_BACKUP_DIR / f"config_{ts}.yaml"
+    if cfg_path.exists():
+        shutil.copy2(cfg_path, backup_path)
+    # Keep only last 20 config backups
+    backups = sorted(SETTINGS_BACKUP_DIR.glob("config_*.yaml"))
+    if len(backups) > 20:
+        for old in backups[:-20]:
+            old.unlink(missing_ok=True)
+
+    # 4. Apply new values to config
+    for key, val in new_values.items():
+        # Convert number types properly
+        for group in SETTINGS_SCHEMA:
+            for field in group["fields"]:
+                if field["key"] == key and field.get("type") == "number":
+                    try:
+                        val = float(val)
+                        if val == int(val):
+                            val = int(val)
+                    except (ValueError, TypeError):
+                        pass
+                    break
+        _set_nested(current, key, val)
+
+    # 5. Write config
+    try:
+        with open(cfg_path, "w") as f:
+            yaml.dump(current, f, default_flow_style=False, allow_unicode=True)
+    except Exception as e:
+        # Restore backup on write failure
+        if backup_path.exists():
+            shutil.copy2(backup_path, cfg_path)
+        return JSONResponse({"success": False, "error": f"Write failed, backup restored: {e}"}, status_code=500)
+
+    # 6. Invalidate caches
+    global CFG
+    CFG = _load_config()
+
+    return {
+        "success": True,
+        "message": "Settings saved successfully",
+        "backup": str(backup_path.name),
+        "restart_required": True,
+    }
+
+
+@app.post(
+    "/api/settings/restart-dashboard",
+    tags=["System"],
+    summary="Restart dashboard service",
+    description="Restarts the server-dashboard systemd service. Tries multiple methods in order: sudo with password (if configured), passwordless sudo, then direct systemctl. Used after config changes.",
+    responses={
+        200: {
+            "description": "Restart initiated",
+            "content": {
+                "application/json": {
+                    "example": {"success": True, "message": "Dashboard restarting..."}
+                }
+            },
+        },
+        500: {
+            "description": "Restart failed",
+            "content": {
+                "application/json": {
+                    "example": {"success": False, "message": "Failed to restart service"}
+                }
+            },
+        },
+    },
+)
+async def restart_dashboard_service():
+    """Restart the server-dashboard systemd service."""
+    try:
+        # Try multiple methods in order of preference
+        for method in [
+            # Method 1: sudo with password (if configured)
+            (SUDO_MODE == "sudo_password" and SUDO_PASSWORD,
+             ["bash", "-c", f"echo '{SUDO_PASSWORD}' | sudo -S systemctl restart server-dashboard.service"]),
+            # Method 2: passwordless sudo
+            (True, ["sudo", "-n", "systemctl", "restart", "server-dashboard.service"]),
+            # Method 3: direct systemctl (no sudo)
+            (True, ["systemctl", "restart", "server-dashboard.service"]),
+        ]:
+            should_try, cmd = method
+            if not should_try:
+                continue
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+            if result.returncode == 0:
+                return {"success": True, "message": "Dashboard restarting..."}
+            # If method 2 failed, try next
+        return JSONResponse(
+            {"success": False, "message": result.stderr.strip() or "Restart failed"},
+            status_code=500
+        )
+    except Exception as e:
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+
+
+# ── Health endpoint ────────────────────────────────────────────────────
+
+def get_health_state(system: dict, connections: dict) -> str:
+    """Determine health state based on metrics and connections."""
+    # Critical conditions (RED)
+    if connections.get("internet", {}).get("reachable", True) is False:
+        return "red"
+    if connections.get("hermes_gateway", {}).get("reachable", True) is False:
+        return "red"
+    if connections.get("binance_bot", {}).get("reachable", True) is False:
+        return "red"
+    
+    # Check disk critical (>= 95%)
+    if system.get("disk", {}).get("percent", 100) >= 95:
+        return "red"
+    
+    # Warning conditions (YELLOW)
+    cpu_warn = system.get("cpu", {}).get("percent", 100) >= 70
+    ram_warn = system.get("memory", {}).get("percent", 100) >= 80
+    disk_warn = system.get("disk", {}).get("percent", 100) >= 85
+    
+    # Any warning metric = YELLOW (unless critical already)
+    if cpu_warn or ram_warn or disk_warn:
+        return "yellow"
+    
+    # All good = GREEN
+    return "green"
+
+
+@app.get(
+    "/api/health",
+    tags=["System"],
+    summary="Health status",
+    description="Returns aggregated health state based on system metrics and connectivity checks. Returns 'green', 'yellow', or 'red' state with full system and connection data. Used for health badges and monitoring.",
+    responses={
+        200: {
+            "description": "Health status",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "state": "green",
+                        "system": {
+                            "cpu": {"percent": 12.5},
+                            "memory": {"percent": 38.4},
+                            "disk": {"percent": 49.1}
+                        },
+                        "connections": {
+                            "google_dns": {"status": "ok"},
+                            "cloudflare": {"status": "ok"},
+                            "internet": {"reachable": True}
+                        }
+                    }
+                }
+            },
+        }
+    },
+)
+async def health():
+    """Get aggregated health state from system metrics and connections."""
+    system = _cached("health_system", 30, get_system_metrics)
+    connections = _cached("health_connections", 15, get_connections)
+    state = get_health_state(system, connections)
+    
+    return {
+        "state": state,
+        "system": system,
+        "connections": connections,
+    }
 
 
 # ── Main ──────────────────────────────────────────────────────────────

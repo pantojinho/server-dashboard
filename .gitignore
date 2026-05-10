@@ -39,3 +39,5 @@ config.yaml
 
 # Dev artifacts
 visual-plan.html
+backups/
+static/index.html.backup*

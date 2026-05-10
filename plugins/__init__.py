@@ -14,11 +14,18 @@ See plugins/example_plugin.py for a working reference.
 """
 
 from plugins.base import DashboardPlugin
-from plugins.loader import load_plugins, get_plugin_tabs, get_plugin_routes, get_plugin_collectors
+from plugins.loader import (
+    load_plugins,
+    get_plugins,
+    get_plugin_tabs,
+    get_plugin_routes,
+    get_plugin_collectors
+)
 
 __all__ = [
     "DashboardPlugin",
     "load_plugins",
+    "get_plugins",
     "get_plugin_tabs",
     "get_plugin_routes",
     "get_plugin_collectors",
