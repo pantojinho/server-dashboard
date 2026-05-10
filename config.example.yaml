@@ -1,0 +1,87 @@
+# Configuration for Hermes Server Dashboard
+# Copy this file to config.yaml and adjust values for your setup.
+
+# ── Server ──────────────────────────────────────────
+server:
+  host: "0.0.0.0"
+  port: 18791
+  log_level: "warning"
+
+# ── Authentication ──────────────────────────────────
+# Set DASHBOARD_PASSWORD env var or configure here.
+# If set, all API endpoints require Basic Auth.
+# auth:
+#   username: "admin"
+#   password: "changeme"  # Better: use env var DASHBOARD_PASSWORD
+
+# ── Sudo for service restart ────────────────────────
+# How to restart system services. Options:
+#   "sudo_password" — pipe password to sudo -S (requires sudo_password below)
+#   "sudo_nopasswd" — expects passwordless sudo configured for the user
+#   "systemd_user"  — all services run as systemd user services (no sudo needed)
+#   "none"          — disable restart functionality
+sudo_mode: "none"
+# sudo_password: ""  # Only if sudo_mode is "sudo_password". BETTER: use env var SUDO_PASSWORD
+
+# ── Monitored Services ──────────────────────────────
+services:
+  - name: "hermes-gateway"
+    scope: "user"         # "user" = systemctl --user, "system" = systemctl
+    display_name: "Hermes Gateway"
+    allow_restart: true
+  - name: "binance-bot"
+    scope: "system"
+    display_name: "Binance Bot"
+    allow_restart: false
+  - name: "server-dashboard"
+    scope: "system"
+    display_name: "Dashboard"
+    allow_restart: true
+
+# ── Metrics TSDB ────────────────────────────────────
+metrics:
+  scrape_interval: 30      # seconds between metric collections
+  retention_days: 35        # auto-cleanup old data
+  history_length: 60        # rolling sparkline buffer size
+
+# ── Alert Thresholds ────────────────────────────────
+alerts:
+  cpu_temp_celsius: 85
+  cpu_percent: 80
+  disk_percent: 90
+
+# ── External Integrations ───────────────────────────
+# Leave empty/null to disable
+integrations:
+  # Binance Bot API
+  bot_api_url: "http://localhost:18790/api"
+  bot_proxy: true   # proxy /bot-api/* to bot_api_url
+
+  # BitsyMiner (ESP32 Bitcoin miner)
+  bitsy_url: ""     # e.g. "http://192.168.1.132/statusJson" — empty to disable
+
+  # Telegram alerts for temperature/threshold breaches
+  telegram:
+    enabled: false
+    # bot_token: ""    # Better: use env var TELEGRAM_BOT_TOKEN
+    # chat_id: ""      # Better: use env var TELEGRAM_CHAT_ID
+
+# ── Hermes Agent Integration ────────────────────────────────────
+# Reads from ~/.hermes/ automatically.
+# Only configure if your Hermes home is in a non-standard location.
+# hermes_home: "~/.hermes"
+# gateway_service: "hermes-gateway.service"  # systemd service name for the gateway
+
+# ── CORS ────────────────────────────────────────────
+cors:
+  allow_origins:
+    - "*"       # Restrict in production!
+  allow_methods:
+    - "*"
+  allow_headers:
+    - "*"
+
+# ── Backup ──────────────────────────────────────────
+backup:
+  directory: "~/backups"
+  max_copies: 10

@@ -1,0 +1,84 @@
+"""
+Example plugin for Hermes Server Dashboard.
+
+This demonstrates all available plugin hooks. Copy this file as a starting
+point for your own plugins.
+
+To enable: rename this file to remove the .example suffix, or copy it
+to a new .py file in the plugins/ directory.
+"""
+
+from __future__ import annotations
+from typing import Any
+
+from plugins.base import DashboardPlugin
+
+
+class ExamplePlugin(DashboardPlugin):
+    """A minimal example plugin that adds a custom tab."""
+
+    @property
+    def name(self) -> str:
+        return "example"
+
+    @property
+    def display_name(self) -> str:
+        return "EXAMPLE"
+
+    def tab_html(self) -> str:
+        return """
+        <div class="panel">
+            <div class="panel-header">
+                <span class="retro-cyan">▶</span> EXAMPLE PLUGIN
+            </div>
+            <div class="panel-body">
+                <p class="retro-text">
+                    This is an example plugin tab. Replace this with your own content.
+                </p>
+                <div id="example-data" class="mono retro-green" style="margin-top: 1em;">
+                    Loading...
+                </div>
+            </div>
+        </div>
+        """
+
+    def scripts_html(self) -> str:
+        return """
+        <script>
+        // Example: poll custom API endpoint
+        (function() {
+            const el = document.getElementById('example-data');
+            if (!el) return;
+            async function refresh() {
+                try {
+                    const data = await dashboard.api('/api/plugin/example/status');
+                    el.textContent = 'Status: ' + JSON.stringify(data, null, 2);
+                } catch (e) {
+                    el.textContent = 'Error: ' + e.message;
+                }
+            }
+            refresh();
+            setInterval(refresh, 10000);
+        })();
+        </script>
+        """
+
+    def register_routes(self, app) -> None:
+        from fastapi import FastAPI
+
+        @app.get("/api/plugin/example/status")
+        async def example_status():
+            return {
+                "plugin": "example",
+                "status": "running",
+                "message": "Hello from the example plugin!",
+            }
+
+    def collect_metrics(self) -> dict[str, Any] | None:
+        # Example: return a custom metric each scrape cycle
+        # Metric names prefixed with plugin_ to avoid collisions
+        import time
+        return {
+            "plugin_example_uptime": time.time(),
+            "plugin_example_counter": 1,
+        }

@@ -1,0 +1,1550 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HERMES SERVER OPS</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400;500;700&display=swap');
+
+  :root {
+    --bg: #060610;
+    --bg-panel: #0a0a16;
+    --bg-panel-hover: #0d0d1c;
+    --gold: #FFD700;
+    --gold-light: #FFBF00;
+    --gold-dark: #CD7F32;
+    --gold-dim: #B8860B;
+    --text: #e8e4d8;
+    --text-dim: #5a5666;
+    --text-mid: #8a8494;
+    --green: #00ff88;
+    --green-mid: #00cc6a;
+    --green-dim: #008844;
+    --cyan: #00d4ff;
+    --cyan-dim: #0088aa;
+    --red: #ff4444;
+    --red-dim: #aa2222;
+    --yellow: #ffcc00;
+    --orange: #ff8800;
+    --border: #181828;
+    --border-glow: rgba(255,215,0,0.08);
+    --page-bg: #0c0c18;
+  }
+
+  * { margin:0; padding:0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Fira Code', 'Courier New', monospace;
+    font-size: 12px;
+    line-height: 1.35;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+  body::before {
+    content: ''; position: fixed; top:0; left:0; right:0; bottom:0;
+    background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px);
+    pointer-events: none; z-index: 9999;
+    animation: scanline 8s linear infinite;
+  }
+  @keyframes scanline {
+    0% { background-position: 0 0; }
+    100% { background-position: 0 100vh; }
+  }
+  body::after {
+    content: ''; position: fixed; top:0; left:0; right:0; bottom:0;
+    box-shadow: inset 0 0 150px rgba(0,0,0,0.7);
+    pointer-events: none; z-index: 9998;
+  }
+
+  /* TOPBAR */
+  .topbar {
+    position: sticky; top:0; z-index: 1000;
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 6px 16px; background: rgba(10,10,22,0.92);
+    backdrop-filter: blur(12px); border-bottom: 1px solid var(--border);
+  }
+  .topbar-left { display: flex; align-items: center; gap: 10px; }
+  .topbar-logo {
+    display: flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px;
+    animation: hermesGlow 3s ease-in-out infinite;
+    transition: transform 0.3s ease;
+  }
+  .topbar-logo:hover { transform: scale(1.12); }
+  .topbar-logo svg { width: 100%; height: 100%; }
+  @keyframes hermesGlow {
+    0%,100% { filter: drop-shadow(0 0 3px rgba(255,215,0,0.15)) brightness(0.88); }
+    50% { filter: drop-shadow(0 0 14px rgba(255,215,0,0.55)) drop-shadow(0 0 28px rgba(255,215,0,0.15)) brightness(1.2); }
+  }
+  .topbar-brand {
+    font-size: 15px; font-weight: 700;
+    background: linear-gradient(180deg, #FFD700 0%, #FFBF00 40%, #CD7F32 100%);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    letter-spacing: 3px; filter: drop-shadow(0 0 6px rgba(255,215,0,0.15));
+  }
+  .topbar-nav { display: flex; gap: 2px; }
+  .nav-btn {
+    padding: 5px 12px; font-size: 10px; font-family: inherit;
+    background: none; border: 1px solid transparent; border-radius: 2px;
+    color: var(--text-dim); cursor: pointer; text-transform: uppercase;
+    letter-spacing: 1px; transition: all 0.3s ease; position: relative;
+  }
+  .nav-btn:hover { color: var(--text-mid); border-color: var(--border); background: rgba(255,255,255,0.02); }
+  .nav-btn.active { color: var(--gold); border-color: var(--gold-dim); background: rgba(255,215,0,0.06); box-shadow: 0 0 8px rgba(255,215,0,0.05); }
+  .topbar-right { display: flex; align-items: center; gap: 10px; font-size: 10px; color: var(--text-dim); }
+  .live-badge { color: var(--green); text-shadow: 0 0 6px var(--green); font-weight: 700; letter-spacing: 1px; }
+  .live-dot { display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: var(--green); box-shadow: 0 0 4px var(--green); animation: pulse 2s infinite; margin-right: 3px; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+  /* PAGES */
+  .page { display: none; padding: 8px 12px 16px; max-width: 1600px; margin: 0 auto; }
+  .page.active { display: block; animation: pageIn 0.35s ease; }
+  @keyframes pageIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+
+  /* MAIN GRID */
+  .main-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; align-items: stretch; }
+
+  /* PANEL */
+  .panel {
+    background: var(--bg-panel); border: 1px solid var(--border); border-radius: 2px;
+    overflow: hidden; transition: border-color 0.4s ease, box-shadow 0.4s ease, transform 0.2s ease;
+    animation: panelIn 0.5s ease backwards;
+    height: 100%; display: flex; flex-direction: column;
+  }
+  .panel:hover { border-color: rgba(255,215,0,0.18); box-shadow: 0 0 20px rgba(255,215,0,0.04), inset 0 0 20px rgba(255,215,0,0.02); }
+  @keyframes panelIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .panel:nth-child(1) { animation-delay: 0.0s; }
+  .panel:nth-child(2) { animation-delay: 0.06s; }
+  .panel:nth-child(3) { animation-delay: 0.12s; }
+  .panel:nth-child(4) { animation-delay: 0.18s; }
+  .panel:nth-child(5) { animation-delay: 0.24s; }
+  .panel-hdr {
+    background: linear-gradient(90deg, rgba(205,127,50,0.15) 0%, rgba(184,134,11,0.08) 50%, transparent 100%);
+    padding: 3px 10px; font-size: 10px; font-weight: 600;
+    color: var(--gold-dark); text-transform: uppercase; letter-spacing: 1.5px;
+    display: flex; justify-content: space-between; align-items: center;
+    border-bottom: 1px solid var(--border);
+  }
+  .panel-hdr .hdr-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--green); box-shadow: 0 0 3px var(--green); animation: pulse 2s infinite; }
+  .panel-hdr .hdr-dot.off { background: var(--red); box-shadow: 0 0 3px var(--red); }
+  .panel-body { padding: 8px 10px; flex: 1; display: flex; flex-direction: column; }
+
+  .c12 { grid-column: 1 / 3; }
+  .c23 { grid-column: 2 / 4; }
+  .c34 { grid-column: 3 / 5; }
+  .c14 { grid-column: 1 / 5; }
+
+  /* METRICS */
+  .sys-grid { display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(2, 1fr); gap: 8px; flex: 1; }
+  .metric { display: flex; flex-direction: column; gap: 2px; justify-content: center; padding: 4px 6px; background: rgba(255,255,255,0.02); border-radius: 2px; border: 1px solid rgba(255,215,0,0.06); }
+  .metric-label { font-size: 9px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; }
+  .metric-val { font-size: 26px; font-weight: 700; color: var(--green); line-height: 1.1; transition: color 0.4s ease, text-shadow 0.4s ease; }
+  .metric-val.warn { color: var(--yellow); text-shadow: 0 0 8px rgba(255,204,0,0.3); }
+  .metric-val.crit { color: var(--red); text-shadow: 0 0 8px rgba(255,68,68,0.3); animation: critPulse 1.5s ease-in-out infinite; }
+  @keyframes critPulse { 0%,100% { text-shadow: 0 0 4px rgba(255,68,68,0.2); } 50% { text-shadow: 0 0 16px rgba(255,68,68,0.6); } }
+  .metric-val.cyan { color: var(--cyan); }
+  .metric-val.gold { color: var(--gold-light); }
+  .metric-sub { font-size: 9px; color: var(--text-dim); line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .gauge { font-size: 10px; color: #1a1a2a; letter-spacing: 0; line-height: 1; margin-top: 2px; font-weight: 700; transition: all 0.4s ease; }
+  .gauge .on { color: var(--green); text-shadow: 0 0 2px var(--green); transition: color 0.4s ease, text-shadow 0.4s ease; }
+  .gauge .on.warn { color: var(--yellow); text-shadow: 0 0 4px rgba(255,204,0,0.4); }
+  .gauge .on.crit { color: var(--red); text-shadow: 0 0 4px rgba(255,68,68,0.4); }
+
+  /* NEOFETCH */
+  .neofetch-grid { display: grid; grid-template-columns: auto 1fr; gap: 14px; align-items: start; }
+  .neofetch-ascii { font-size: 6.5px; line-height: 1.05; color: #4CAF50; white-space: pre; font-family: 'Fira Code', monospace; letter-spacing: 0.5px; text-shadow: 0 0 8px rgba(76,175,80,0.3); animation: mintBreathe 4s ease-in-out infinite; }
+  @keyframes mintBreathe {
+    0%,100% { text-shadow: 0 0 6px rgba(76,175,80,0.2); filter: brightness(0.9); }
+    50% { text-shadow: 0 0 18px rgba(76,175,80,0.5), 0 0 40px rgba(76,175,80,0.15); filter: brightness(1.15); }
+  }
+  .neofetch-info { display: flex; flex-direction: column; gap: 2px; font-size: 11px; padding-top: 0; justify-content: start; }
+  .nf-row { display: flex; gap: 6px; align-items: baseline; line-height: 1.4; }
+  .nf-key { color: #4CAF50; min-width: 65px; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px; }
+  .nf-sep { color: #555; font-size: 9px; }
+  .nf-val { color: #ccc; font-size: 9px; word-break: break-all; }
+  .nf-val.green { color: var(--green); }
+  .nf-val.yellow { color: var(--yellow); }
+  .nf-colors { display: flex; gap: 1px; margin-top: 6px; }
+  .nf-colors span { display: inline-block; width: 32px; height: 8px; animation: nfPulse 2.5s ease-in-out infinite; border-radius: 1px; }
+  .nf-colors span:nth-child(1) { background: #111; animation-delay: 0s; }
+  .nf-colors span:nth-child(2) { background: #e53935; animation-delay: 0.12s; }
+  .nf-colors span:nth-child(3) { background: #43a047; animation-delay: 0.24s; }
+  .nf-colors span:nth-child(4) { background: #fdd835; animation-delay: 0.36s; }
+  .nf-colors span:nth-child(5) { background: #1e88e5; animation-delay: 0.48s; }
+  .nf-colors span:nth-child(6) { background: #8e24aa; animation-delay: 0.60s; }
+  .nf-colors span:nth-child(7) { background: #00acc1; animation-delay: 0.72s; }
+  .nf-colors span:nth-child(8) { background: #eee; animation-delay: 0.84s; }
+  @keyframes nfPulse { 0%,100% { opacity: 0.55; transform: scaleY(1); } 50% { opacity: 1; transform: scaleY(1.6); filter: brightness(1.5); } }
+
+  /* BOT DE TRADE */
+  .bot-status-dot {
+    width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 4px;
+  }
+  .bot-status-dot.live { background: var(--green); box-shadow: 0 0 6px var(--green); animation: pulse 2s infinite; }
+  .bot-status-dot.paper { background: var(--cyan); box-shadow: 0 0 6px var(--cyan); }
+  .bot-status-dot.stopped { background: #555; }
+  .bot-metric { display: flex; justify-content: space-between; padding: 3px 0; font-size: 10px; border-bottom: 1px solid rgba(255,255,255,0.02); }
+  .bot-metric:last-child { border-bottom: none; }
+  .bot-key { color: var(--text-dim); }
+  .bot-val { color: var(--gold-light); font-weight: 600; }
+  .bot-val.green { color: var(--green); }
+  .bot-val.red { color: var(--red); }
+  .bot-val.yellow { color: var(--yellow); }
+  .bot-regime { padding: 2px 8px; border-radius: 2px; font-size: 9px; font-weight: 600; display: inline-block; }
+  .bot-regime.alta { background: rgba(0,255,136,0.15); color: var(--green); border: 1px solid var(--green-dim); }
+  .bot-regime.neutro { background: rgba(255,204,0,0.15); color: var(--yellow); border: 1px solid var(--yellow); }
+  .bot-regime.baixa { background: rgba(255,68,68,0.15); color: var(--red); border: 1px solid var(--red-dim); }
+  .bot-decision { font-size: 10px; padding: 3px 0; border-bottom: 1px solid rgba(255,255,255,0.02); }
+  .bot-decision:last-child { border-bottom: none; }
+  .bot-dec-icon { margin-right: 4px; }
+  .bot-dec-text { color: var(--text); }
+  .bot-dec-reason { color: var(--text-dim); font-size: 8px; }
+
+  /* SERVICES */
+  .svc-table { width: 100%; font-size: 10px; border-collapse: collapse; }
+  .svc-table th { text-align: left; color: var(--gold-dim); font-weight: 500; padding: 2px 8px; font-size: 8px; text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid var(--border); }
+  .svc-table td { padding: 3px 8px; border-bottom: 1px solid rgba(255,255,255,0.02); }
+  .svc-dot { display: inline-block; width: 5px; height: 5px; border-radius: 50%; vertical-align: middle; margin-right: 4px; }
+  .svc-dot.on { background: var(--green); box-shadow: 0 0 3px var(--green); }
+  .svc-dot.off { background: #333; }
+  .restart-btn {
+    background: none; border: 1px solid var(--border); color: var(--text-dim);
+    padding: 1px 6px; border-radius: 2px; cursor: pointer; font-size: 10px;
+    font-family: inherit; transition: all 0.25s ease;
+  }
+  .restart-btn:hover { border-color: var(--gold-dark); color: var(--gold-light); box-shadow: 0 0 6px rgba(255,215,0,0.08); }
+  .restart-btn.spinning { animation: spin 0.8s linear infinite; color: var(--cyan); }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* HERMES AGENT */
+  .hermes-sub-grid { display: grid; grid-template-columns: 1fr 1.3fr 1.2fr; gap: 10px; }
+  .hs h4 { color: var(--gold-dark); font-size: 9px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; padding-bottom: 3px; border-bottom: 1px solid var(--border); font-weight: 600; }
+  .info-row { display: flex; gap: 8px; padding: 2px 0; font-size: 10px; }
+  .info-key { color: var(--text-dim); min-width: 90px; }
+  .info-val { color: var(--cyan); }
+  .plat-item { display: flex; justify-content: space-between; align-items: center; padding: 2px 0; font-size: 10px; }
+  .plat-name { color: var(--text); }
+  .plat-status { font-size: 9px; }
+  .plat-status.on { color: var(--green); }
+  .plat-status.off { color: #444; }
+  .cron-item { display: flex; align-items: flex-start; gap: 6px; padding: 4px 0; font-size: 10px; border-bottom: 1px solid rgba(255,255,255,0.02); flex-wrap: wrap; }
+  .cron-icon { font-size: 8px; width: 10px; text-align: center; flex-shrink: 0; margin-top: 1px; }
+  .cron-icon.ok { color: var(--green); }
+  .cron-icon.err { color: var(--red); }
+  .cron-icon.dis { color: #444; }
+  .cron-name { color: var(--text); flex: 1; min-width: 80px; }
+  .cron-sched { color: var(--text-dim); font-size: 9px; }
+  .cron-meta { color: var(--text-dim); font-size: 8px; width: 100%; padding-left: 16px; }
+  .cron-error { color: var(--red); font-size: 8px; width: 100%; padding-left: 16px; }
+  .sess-item { display: flex; flex-direction: column; padding: 3px 0; font-size: 10px; border-bottom: 1px solid rgba(255,255,255,0.02); gap: 1px; }
+
+  /* KANBAN */
+  .kanban-item { display: flex; flex-direction: column; padding: 6px 8px; margin-bottom: 5px; background: rgba(255,255,255,0.02); border-radius: 3px; border-left: 3px solid var(--cyan); gap: 3px; transition: background 0.2s; }
+  .kanban-item:hover { background: rgba(255,255,255,0.05); }
+  .kanban-item.priority-high { border-left-color: var(--red); }
+  .kanban-item.priority-medium { border-left-color: var(--yellow); }
+  .kanban-item.priority-low { border-left-color: var(--green); }
+  .kanban-item.status-triage { border-left-color: #ffa500; background: rgba(255,165,0,0.03); }
+  .kanban-title { font-size: 10px; color: var(--text); font-weight: 600; line-height: 1.3; }
+  .kanban-meta { font-size: 8px; color: var(--text-dim); display: flex; gap: 8px; flex-wrap: wrap; }
+  .kanban-meta .badge { background: rgba(0,200,200,0.12); color: var(--cyan); padding: 0 4px; border-radius: 2px; font-size: 7px; }
+  .kanban-empty { color: var(--text-dim); font-size: 9px; padding: 8px 0; text-align: center; font-style: italic; }
+  .sess-top { display: flex; justify-content: space-between; align-items: baseline; }
+  .sess-title { color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; flex: 1; }
+  .sess-msgs { color: var(--cyan); font-size: 9px; white-space: nowrap; }
+  .sess-time { color: var(--text-dim); font-size: 8px; }
+
+  /* CONNECTIONS */
+  .conn-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .conn-item { background: rgba(255,255,255,0.015); padding: 4px 8px; border-radius: 2px; border-left: 2px solid var(--border); }
+  .conn-item.ok { border-left-color: var(--green); }
+  .conn-item.fail { border-left-color: var(--red); }
+  .conn-label { font-size: 8px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
+  .conn-val { font-size: 11px; font-weight: 600; margin-top: 1px; }
+  .conn-val.ok { color: var(--green); }
+  .conn-val.fail { color: var(--red); }
+  .conn-lat { font-size: 8px; color: var(--text-dim); }
+
+  /* DOCKER */
+  .docker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px; }
+  .docker-item { background: rgba(255,255,255,0.015); padding: 4px 8px; border-radius: 2px; border-left: 2px solid var(--green); font-size: 9px; }
+  .docker-item.stopped { border-left-color: #333; }
+  .docker-name { color: var(--text); font-weight: 600; font-size: 10px; }
+  .docker-state { color: var(--green); font-size: 8px; margin-top: 1px; }
+  .docker-state.stopped { color: #555; }
+  .docker-ports { color: var(--text-dim); font-size: 7px; margin-top: 1px; }
+  .docker-empty { color: var(--text-dim); font-size: 10px; font-style: italic; }
+
+  /* LOGS PANEL (CONTROL PAGE) */
+  .log-toolbar {
+    display: flex; gap: 4px; align-items: center; margin-bottom: 6px; flex-wrap: wrap;
+  }
+  .log-toolbar .ctrl-btn { padding: 3px 10px; font-size: 9px; }
+  .log-toolbar .ctrl-btn.active { background: rgba(255,215,0,0.25); border-color: var(--gold); color: var(--gold); }
+  .log-search {
+    flex: 1; min-width: 120px; padding: 3px 8px; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 2px; color: var(--text); font-family: inherit; font-size: 10px; outline: none;
+    transition: border-color 0.3s ease;
+  }
+  .log-search:focus { border-color: var(--gold-dim); }
+  .log-auto-toggle {
+    display: flex; align-items: center; gap: 4px; font-size: 9px; color: var(--text-dim); cursor: pointer;
+    user-select: none;
+  }
+  .log-auto-toggle input { accent-color: var(--gold); cursor: pointer; }
+  .log-console {
+    background: #050510; border: 1px solid var(--border); border-radius: 2px;
+    padding: 6px 8px; font-size: 10px; line-height: 1.45; height: 420px; overflow-y: auto;
+    scroll-behavior: smooth; transition: border-color 0.3s ease;
+  }
+  .log-console.loading { border-color: var(--gold-dim); }
+  .log-line { padding: 1px 0; animation: logFadeIn 0.15s ease; }
+  @keyframes logFadeIn { from { opacity: 0.4; } to { opacity: 1; } }
+  .log-line.info { color: var(--cyan); }
+  .log-line.warn { color: var(--yellow); }
+  .log-line.error { color: var(--red); }
+  .log-line.ok { color: var(--green); }
+  .log-line.dim { color: var(--text-dim); }
+  .log-line .log-ts { color: var(--text-dim); margin-right: 6px; font-size: 9px; }
+  .log-line .log-tag { font-size: 8px; padding: 0 3px; border-radius: 1px; margin-right: 4px; font-weight: 600; }
+  .log-line .log-tag.info { background: rgba(0,212,255,0.12); color: var(--cyan); }
+  .log-line .log-tag.warn { background: rgba(255,204,0,0.12); color: var(--yellow); }
+  .log-line .log-tag.error { background: rgba(255,68,68,0.12); color: var(--red); }
+  .log-line .log-tag.ok { background: rgba(0,255,136,0.12); color: var(--green); }
+  .log-stats { display: flex; gap: 12px; font-size: 9px; color: var(--text-dim); margin-top: 4px; }
+  .log-stats span b { color: var(--text-mid); }
+
+  /* CONTROL FORM */
+  .ctrl-form { display: flex; flex-direction: column; gap: 6px; }
+  .ctrl-row { display: flex; gap: 8px; align-items: center; }
+  .ctrl-label { color: var(--text-dim); font-size: 10px; min-width: 120px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .ctrl-select, .ctrl-input {
+    flex: 1; padding: 4px 8px; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 2px; color: var(--text); font-family: inherit; font-size: 10px; outline: none;
+  }
+  .ctrl-select:focus, .ctrl-input:focus { border-color: var(--gold-dim); }
+  .ctrl-btn {
+    padding: 4px 12px; background: rgba(255,215,0,0.1); border: 1px solid var(--gold-dim);
+    border-radius: 2px; color: var(--gold-light); font-family: inherit; font-size: 10px;
+    cursor: pointer; text-transform: uppercase; letter-spacing: 1px;
+    transition: all 0.25s ease; position: relative; overflow: hidden;
+  }
+  .ctrl-btn:hover { background: rgba(255,215,0,0.2); box-shadow: 0 0 12px rgba(255,215,0,0.08); transform: translateY(-1px); }
+  .ctrl-btn:active { transform: translateY(0); box-shadow: none; }
+  .ctrl-btn.danger { background: rgba(255,68,68,0.1); border-color: var(--red-dim); color: var(--red); }
+  .ctrl-btn.danger:hover { background: rgba(255,68,68,0.2); box-shadow: 0 0 12px rgba(255,68,68,0.08); }
+  .ctrl-result { font-size: 10px; padding: 4px 8px; border-radius: 2px; margin-top: 4px; }
+  .ctrl-result.ok { background: rgba(0,255,136,0.1); border: 1px solid var(--green-dim); color: var(--green); }
+  .ctrl-result.err { background: rgba(255,68,68,0.1); border: 1px solid var(--red-dim); color: var(--red); }
+
+  /* FOOTER */
+  .footer {
+    margin-top: 10px; padding: 5px 0; border-top: 1px solid var(--border-glow);
+    display: flex; justify-content: space-between; color: var(--text-dim); font-size: 10px;
+  }
+  .cursor-blink { color: var(--green); animation: blink 1s step-end infinite; }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+  /* TOAST */
+  .toast-container { position: fixed; bottom: 16px; right: 16px; z-index: 10000; display: flex; flex-direction: column; gap: 8px; }
+  .toast { padding: 8px 14px; border-radius: 3px; font-size: 10px; animation: toastIn 0.35s cubic-bezier(0.34,1.56,0.64,1), toastOut 0.4s ease 3.6s forwards; max-width: 320px; backdrop-filter: blur(8px); }
+  .toast.success { background: rgba(0,255,136,0.12); border: 1px solid var(--green); color: var(--green); box-shadow: 0 4px 16px rgba(0,255,136,0.1); }
+  .toast.error { background: rgba(255,68,68,0.12); border: 1px solid var(--red); color: var(--red); box-shadow: 0 4px 16px rgba(255,68,68,0.1); }
+  @keyframes toastIn { from { opacity:0; transform: translateX(40px) scale(0.9); } to { opacity:1; transform: translateX(0) scale(1); } }
+  @keyframes toastOut { from { opacity:1; transform: translateY(0); } to { opacity:0; transform: translateY(10px); } }
+
+  /* SPARK */
+  .spark { font-size: 10px; color: var(--cyan); letter-spacing: 0.5px; line-height: 1; margin-top: 4px; overflow: hidden; }
+  .spark.gold { color: var(--yellow); }
+
+  /* GRAFICOS TAB */
+  .chart-controls {
+    display: flex; gap: 4px; align-items: center; margin-bottom: 8px; flex-wrap: wrap;
+  }
+  .chart-controls .ctrl-btn { padding: 3px 10px; font-size: 9px; }
+  .chart-controls .ctrl-btn.active { background: rgba(255,215,0,0.25); border-color: var(--gold); color: var(--gold); }
+  .chart-status {
+    margin-left: auto; font-size: 9px; color: var(--text-dim);
+    display: flex; align-items: center; gap: 6px;
+  }
+  .chart-status .live-dot { width: 4px; height: 4px; }
+  .chart-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+  }
+  .chart-box {
+    background: var(--bg-panel); border: 1px solid var(--border); border-radius: 2px;
+    padding: 6px 8px; min-height: 200px; position: relative;
+  }
+  .chart-box.full { grid-column: 1 / -1; }
+  .chart-title {
+    font-size: 9px; color: var(--gold-dark); text-transform: uppercase;
+    letter-spacing: 1px; margin-bottom: 4px; font-weight: 600;
+  }
+  .chart-canvas-wrap { width: 100%; height: 180px; }
+  .chart-canvas-wrap.tall { height: 240px; }
+  .chart-no-data { color: var(--text-dim); font-size: 10px; font-style: italic; text-align: center; padding: 60px 0; }
+  @media (max-width: 1200px) {
+    .chart-grid { grid-template-columns: 1fr; }
+  }
+
+  /* RESPONSIVE */
+  @media (max-width: 1200px) {
+    .main-grid { grid-template-columns: repeat(2, 1fr); }
+    .c12, .c14, .c34 { grid-column: 1 / -1; }
+    .sys-grid { grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(2, 1fr); }
+    .hermes-sub-grid { grid-template-columns: 1fr; }
+    .conn-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 800px) {
+    .main-grid { grid-template-columns: 1fr; }
+    .c12, .c14, .c34 { grid-column: 1; }
+    .sys-grid { grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(3, 1fr); }
+    .topbar-nav { flex-wrap: wrap; }
+    .conn-grid { grid-template-columns: 1fr; }
+    .neofetch-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<!-- TOPBAR -->
+<div class="topbar">
+  <div class="topbar-left">
+    <span class="topbar-logo">
+      <img src="/static/hermes-logo.png" alt="Hermes" style="width:28px; height:28px; border-radius:4px; object-fit:contain;">
+    </span>
+    <span class="topbar-brand">HERMES <span style="font-size:10px; opacity:0.5; letter-spacing:1px;">SERVER OPS</span></span>
+    <nav class="topbar-nav">
+      <button class="nav-btn active" data-page="dashboard" onclick="showPage('dashboard', this)">System</button>
+      <button class="nav-btn" data-page="bot" onclick="showPage('bot', this)">Bot Trade</button>
+      <button class="nav-btn" data-page="ops" onclick="showPage('ops', this)">Operations</button>
+      <button class="nav-btn" data-page="logs" onclick="showPage('logs', this)">Logs</button>
+      <button class="nav-btn" data-page="graficos" onclick="showPage('graficos', this)">Charts</button>
+    </nav>
+  </div>
+  <div class="topbar-right">
+    <span id="hostname-top">---</span>
+    <span>·</span>
+    <span class="live-badge"><span class="live-dot"></span>LIVE</span>
+  </div>
+</div>
+
+<!-- PAGE: DASHBOARD -->
+<div id="page-dashboard" class="page active">
+  <div class="main-grid">
+
+    <!-- ROW 1: NEOFETCH (col 1-2) + SYSTEM RESOURCES (col 3-4) -->
+    <div class="panel c12">
+      <div class="panel-hdr"><span>NEOFETCH</span><span class="hdr-dot"></span></div>
+      <div class="panel-body">
+        <div class="neofetch-grid">
+          <pre class="neofetch-ascii">      ...-:::::-...
+          .-MMMMMMMMMMMMMMM-.
+      .-MMMM`..-:::::::-..`MMMM-.
+    .:MMMM.:MMMMMMMMMMMMMMM:.MMMM:.
+   -MMM-M---MMMMMMMMMMMMMMMMMMM.MMM-
+ `:MMM:MM`  :MMMM:....::-...-MMMM:MMM:`
+ :MMM:MMM`  :MM:`  ``    ``  `:MMM:MMM:
+.MMM.MMMM`  :MM.  -MM.  .MM-  `MMMM.MMM.
+:MMM:MMMM`  :MM.  -MM-  .MM:  `MMMM-MMM:
+:MMM:MMMM`  :MM.  -MM-  .MM:  `MMMM:MMM:
+:MMM:MMMM`  :MM.  -MM-  .MM:  `MMMM-MMM:
+.MMM.MMMM`  :MM:--:MM:--:MM:  `MMMM.MMM.
+ :MMM:MMM-  `-MMMMMMMMMMMM-`  -MMM-MMM:
+  :MMM:MMM:`                `:MMM:MMM:
+   .MMM.MMMM:--------------:MMMM.MMM.
+     '-MMMM.-MMMMMMMMMMMMMMM-.MMMM-'
+       '.-MMMM``--:::::--``MMMM-.'
+            '-MMMMMMMMMMMMM-'
+               ``-:::::-``</pre>
+          <div class="neofetch-info" id="neofetch-info">
+            <div class="nf-row"><span class="nf-key" id="nf-user" style="color:#4CAF50">---</span><span class="nf-sep">@</span><span class="nf-val" id="nf-host-top" style="color:#4CAF50">---</span></div>
+            <div class="nf-row"><span class="nf-val" style="color:#555; font-size:8px;">─────────────────────</span></div>
+            <div class="nf-row"><span class="nf-key">OS</span><span class="nf-sep">:</span><span class="nf-val" id="nf-os">---</span></div>
+            <div class="nf-row"><span class="nf-key">HOST</span><span class="nf-sep">:</span><span class="nf-val" id="nf-host">---</span></div>
+            <div class="nf-row"><span class="nf-key">KERNEL</span><span class="nf-sep">:</span><span class="nf-val" id="nf-kernel">---</span></div>
+            <div class="nf-row"><span class="nf-key">UPTIME</span><span class="nf-sep">:</span><span class="nf-val" id="nf-uptime">---</span></div>
+            <div class="nf-row"><span class="nf-key">PKGS</span><span class="nf-sep">:</span><span class="nf-val" id="nf-pkgs">---</span></div>
+            <div class="nf-row"><span class="nf-key">SHELL</span><span class="nf-sep">:</span><span class="nf-val">bash 5.2.21</span></div>
+            <div class="nf-row"><span class="nf-key">CPU</span><span class="nf-sep">:</span><span class="nf-val" id="nf-cpu">---</span></div>
+            <div class="nf-row"><span class="nf-key">GPU</span><span class="nf-sep">:</span><span class="nf-val" id="nf-gpu">---</span></div>
+            <div class="nf-row"><span class="nf-key">MEM</span><span class="nf-sep">:</span><span class="nf-val" id="nf-mem">---</span></div>
+            <div class="nf-row"><span class="nf-key">DISK</span><span class="nf-sep">:</span><span class="nf-val" id="nf-disk">---</span></div>
+            <div class="nf-row"><span class="nf-key">IPS</span><span class="nf-sep">:</span><span class="nf-val" id="nf-ips">---</span></div>
+            <div class="nf-colors">
+              <span></span><span></span><span></span><span></span>
+              <span></span><span></span><span></span><span></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel c34">
+      <div class="panel-hdr"><span>SYS OVERVIEW</span><span class="hdr-dot" id="sys-dot"></span></div>
+      <div class="panel-body">
+        <div class="sys-grid">
+          <div class="metric">
+            <span class="metric-label">CPU</span>
+            <span class="metric-val" id="cpu-pct">--%</span>
+            <div class="gauge" id="cpu-gauge"></div>
+            <span class="metric-sub" id="cpu-info">---</span>
+          </div>
+          <div class="metric">
+            <span class="metric-label">MEMORY</span>
+            <span class="metric-val" id="mem-pct">--%</span>
+            <div class="gauge" id="mem-gauge"></div>
+            <span class="metric-sub" id="mem-info">---</span>
+          </div>
+          <div class="metric">
+            <span class="metric-label">DISK /</span>
+            <span class="metric-val" id="disk-pct">--%</span>
+            <div class="gauge" id="disk-gauge"></div>
+            <span class="metric-sub" id="disk-info">---</span>
+          </div>
+          <div class="metric">
+            <span class="metric-label">SWAP</span>
+            <span class="metric-val cyan" id="swap-pct">--%</span>
+            <div class="gauge" id="swap-gauge"></div>
+            <span class="metric-sub" id="swap-info">---</span>
+          </div>
+          <div class="metric">
+            <span class="metric-label">CPU HIST</span>
+            <div class="spark" id="cpu-spark">---</div>
+            <span class="metric-sub">last 60 samples</span>
+          </div>
+          <div class="metric">
+            <span class="metric-label">TEMP HIST</span>
+            <div class="spark gold" id="temp-spark">---</div>
+            <span class="metric-sub" id="temp-now">---</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ROW 2: HERMES AGENT (col 1-2) + SERVICES & CONTROLS (col 3-4) -->
+    <div class="panel c12">
+      <div class="panel-hdr"><span>HERMES AGENT</span><span class="hdr-dot" id="hermes-dot"></span></div>
+      <div class="panel-body">
+        <div class="hermes-sub-grid">
+          <div>
+            <div class="hs"><h4>AGENT INFO</h4>
+              <div class="info-row"><span class="info-key">MODEL</span><span class="info-val" id="h-model">---</span></div>
+              <div class="info-row"><span class="info-key">PROVIDER</span><span class="info-val" id="h-provider">---</span></div>
+              <div class="info-row"><span class="info-key">API MODE</span><span class="info-val" id="h-api-mode">---</span></div>
+              <div class="info-row"><span class="info-key">APPROVALS</span><span class="info-val" id="h-approvals">---</span></div>
+              <div class="info-row"><span class="info-key">GW STATUS</span><span class="info-val" id="h-gw-status">---</span></div>
+              <div class="info-row"><span class="info-key">PORT</span><span class="info-val" id="h-port">---</span></div>
+            </div>
+            <div class="hs"><h4 style="margin-top:8px">PLATFORMS</h4>
+              <div id="platforms-list"></div>
+            </div>
+          </div>
+          <div>
+            <div class="hs"><h4>CRON JOBS</h4>
+              <div id="cron-list"></div>
+            </div>
+            <div class="hs"><h4 style="margin-top:8px">ACTIVE SESSIONS</h4>
+              <div id="sessions-list"></div>
+            </div>
+          </div>
+          <div>
+            <div class="hs"><h4>KANBAN <span style="color:var(--text-dim);font-weight:400">ACTIVE</span> <span id="kanban-count" style="float:right;color:var(--cyan);font-weight:700">0</span></h4>
+              <div id="kanban-list"><span style="color:var(--text-dim);font-size:9px">Loading...</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel c34">
+      <div class="panel-hdr"><span>SERVICES & CONTROLS</span><span class="hdr-dot" id="svc-dot"></span></div>
+      <div class="panel-body">
+        <table class="svc-table">
+          <thead><tr><th>SERVICE</th><th>STATUS</th><th>PID</th><th>MEM</th><th>CPU</th><th>ACTION</th></tr></thead>
+          <tbody id="svc-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ROW 3: CONNECTIONS & DOCKER (full width) -->
+    <div class="panel c14">
+      <div class="panel-hdr"><span>CONNECTIONS & DOCKER</span><span class="hdr-dot" id="conn-dot"></span></div>
+      <div class="panel-body">
+        <div class="conn-grid" id="conn-grid" style="margin-bottom:10px;"></div>
+        <div class="docker-grid" id="docker-grid"></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- PAGE: BOT TRADE -->
+<div id="page-bot" class="page">
+  <div class="main-grid">
+    <div class="panel c14">
+      <div class="panel-hdr"><span>BINANCE BOT — LIVE STATUS</span><span class="hdr-dot" id="bot-dot"></span></div>
+      <div class="panel-body">
+        <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap: 8px;">
+          <!-- Col 1: Main Status -->
+          <div>
+            <div style="margin-bottom:6px"><span class="bot-status-dot live" id="bot-status-dot"></span><span id="bot-mode" style="font-size:11px; color:var(--gold-light); font-weight:600;">---</span></div>
+            <div class="bot-metric"><span class="bot-key">REGIME</span><span class="bot-regime" id="bot-regime">---</span></div>
+            <div class="bot-metric"><span class="bot-key">POSITION</span><span class="bot-val" id="bot-pos">None</span></div>
+            <div class="bot-metric"><span class="bot-key">P&L (DAY)</span><span class="bot-val" id="bot-pnl">---</span></div>
+            <div class="bot-metric"><span class="bot-key">CONSEC LOSS</span><span class="bot-val" id="bot-losses">---</span></div>
+            <div class="bot-metric"><span class="bot-key">MIN EQUITY</span><span class="bot-val" id="bot-equity">---</span></div>
+          </div>
+          <!-- Col 2: Last Analysis -->
+          <div>
+            <div style="color:var(--gold-dark); font-size:9px; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">LAST ANALYSIS</div>
+            <div class="bot-metric"><span class="bot-key">TREND 1H</span><span class="bot-val" id="bot-trend1h">---</span></div>
+            <div class="bot-metric"><span class="bot-key">TREND 15M</span><span class="bot-val" id="bot-trend15m">---</span></div>
+            <div class="bot-metric"><span class="bot-key">RSI(14)</span><span class="bot-val" id="bot-rsi">---</span></div>
+            <div class="bot-metric"><span class="bot-key">ADX 15M</span><span class="bot-val" id="bot-adx">---</span></div>
+            <div class="bot-metric"><span class="bot-key">ATR</span><span class="bot-val" id="bot-atr">---</span></div>
+            <div class="bot-metric"><span class="bot-key">PRICE</span><span class="bot-val" id="bot-price">---</span></div>
+          </div>
+          <!-- Col 3: Decisions Log -->
+          <div style="grid-column: 3 / 5;">
+            <div style="color:var(--gold-dark); font-size:9px; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">RECENT DECISIONS</div>
+            <div id="bot-decisions" style="max-height:200px; overflow-y:auto;">
+              <div style="color:var(--text-dim); font-size:10px; font-style:italic;">Loading...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- PAGE: OPERATIONS -->
+<div id="page-ops" class="page">
+  <div class="main-grid">
+    <!-- Model Switcher -->
+    <div class="panel c12">
+      <div class="panel-hdr"><span>⚙ MODELO & API</span></div>
+      <div class="panel-body">
+        <div class="ctrl-form">
+          <div class="ctrl-row">
+            <span class="ctrl-label">CURRENT MODEL</span>
+            <span class="ctrl-val" id="ops-current-model" style="color:var(--gold-light); font-weight:600;">---</span>
+          </div>
+          <div class="ctrl-row">
+            <span class="ctrl-label">PROVIDER</span>
+            <span class="ctrl-val" id="ops-current-provider">---</span>
+          </div>
+          <div style="height:10px; border-top:1px solid var(--border); margin:6px 0;"></div>
+          <div class="ctrl-row">
+            <span class="ctrl-label">SWITCH TO</span>
+            <select class="ctrl-select" id="ops-model-select" style="flex:1">
+              <option>Loading...</option>
+            </select>
+          </div>
+          <div class="ctrl-row">
+            <span class="ctrl-label">PROVIDER</span>
+            <select class="ctrl-select" id="ops-provider-select">
+              <option value="zai">zai</option>
+              <option value="ollama-local">ollama-local</option>
+            </select>
+          </div>
+          <div class="ctrl-row" style="margin-top:8px;">
+            <button class="ctrl-btn" style="background:var(--gold-dim); color:#fff; flex:1;" onclick="switchModel()">⚡ APPLY & RESTART GW</button>
+          </div>
+          <div id="ops-model-result" style="margin-top:6px; font-size:9px;"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="panel c34">
+      <div class="panel-hdr"><span>🔧 QUICK ACTIONS</span></div>
+      <div class="panel-body" style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button class="ctrl-btn" onclick="restartSvc('hermes-gateway')">🔄 RESTART GATEWAY</button>
+        <button class="ctrl-btn" onclick="restartSvc('binance-bot')">🔄 RESTART BOT</button>
+        <button class="ctrl-btn" onclick="restartSvc('server-dashboard')">🔄 RESTART DASHBOARD</button>
+        <button class="ctrl-btn danger" onclick="quickAction('stop-bot')">⏹ STOP BOT</button>
+        <button class="ctrl-btn" onclick="doBackup()">💾 BACKUP CONFIG</button>
+        <button class="ctrl-btn" onclick="quickAction('clear-mem')">🗑 CLEAR MEMORY</button>
+      </div>
+      <div id="ops-action-result" style="padding:6px 10px; font-size:9px;"></div>
+    </div>
+
+    <!-- Hermes Agent Info -->
+    <div class="panel c14">
+      <div class="panel-hdr"><span>📡 HERMES AGENT</span><span class="hdr-dot" id="hermes-dot-ops"></span></div>
+      <div class="panel-body">
+        <div id="hermes-info-ops" style="font-size:10px;">Loading...</div>
+        <div style="margin-top:8px">
+          <div style="color:var(--gold-dark); font-size:9px; text-transform:uppercase; margin-bottom:4px;">CRON JOBS</div>
+          <div id="cron-list-ops" style="font-size:9px;">Loading...</div>
+        </div>
+        <div style="margin-top:8px">
+          <div style="color:var(--gold-dark); font-size:9px; text-transform:uppercase; margin-bottom:4px;">ACTIVE SESSIONS</div>
+          <div id="sessions-list-ops" style="font-size:9px;">Loading...</div>
+        </div>
+        <div style="margin-top:8px">
+          <div style="color:var(--gold-dark); font-size:9px; text-transform:uppercase; margin-bottom:4px;">SKILLS</div>
+          <div id="skills-list-ops" style="font-size:9px; max-height:120px; overflow-y:auto;">Loading...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- PAGE: LOGS -->
+<div id="page-logs" class="page">
+  <div class="main-grid">
+    <div class="panel c14">
+      <div class="panel-hdr"><span>SYSTEM LOGS</span><span class="hdr-dot" id="logs-dot"></span></div>
+      <div class="panel-body">
+        <div class="log-toolbar">
+          <button class="ctrl-btn active" id="log-btn-hermes" onclick="loadLogs('hermes', this)">HERMES GW</button>
+          <button class="ctrl-btn" id="log-btn-bot" onclick="loadLogs('bot', this)">BINANCE BOT</button>
+          <button class="ctrl-btn" id="log-btn-dashboard" onclick="loadLogs('dashboard', this)">DASHBOARD</button>
+          <button class="ctrl-btn" id="log-btn-watchdog" onclick="loadLogs('watchdog', this)">WATCHDOG</button>
+          <input type="text" class="log-search" id="log-search" placeholder="🔍 Filter logs..." oninput="filterLogs()">
+          <label class="log-auto-toggle"><input type="checkbox" id="log-auto-refresh" checked> Auto-refresh</label>
+          <span style="font-size:9px; color:var(--text-dim);" id="log-count">0 lines</span>
+        </div>
+        <div class="log-console" id="log-console">
+          <div class="log-line dim">Select a service above to view logs...</div>
+        </div>
+        <div class="log-stats" id="log-stats"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- PAGE: GRAFICOS -->
+<div id="page-graficos" class="page">
+  <div class="chart-controls">
+    <button class="ctrl-btn active" data-duration="3600" onclick="setChartDuration(3600, this)">1H</button>
+    <button class="ctrl-btn" data-duration="21600" onclick="setChartDuration(21600, this)">6H</button>
+    <button class="ctrl-btn" data-duration="86400" onclick="setChartDuration(86400, this)">24H</button>
+    <button class="ctrl-btn" data-duration="604800" onclick="setChartDuration(604800, this)">7D</button>
+    <button class="ctrl-btn" data-duration="2592000" onclick="setChartDuration(2592000, this)">30D</button>
+    <div class="chart-status">
+      <span class="live-dot"></span>
+      <span id="chart-tsdb-status">TSDB: loading...</span>
+      <span id="chart-points-info"></span>
+    </div>
+  </div>
+  <div class="chart-grid">
+    <!-- System: CPU + Memory -->
+    <div class="chart-box">
+      <div class="chart-title">CPU Usage %</div>
+      <div class="chart-canvas-wrap"><canvas id="chart-cpu"></canvas></div>
+    </div>
+    <div class="chart-box">
+      <div class="chart-title">Memory Usage %</div>
+      <div class="chart-canvas-wrap"><canvas id="chart-mem"></canvas></div>
+    </div>
+    <!-- System: Disk + Swap -->
+    <div class="chart-box">
+      <div class="chart-title">Disk Usage %</div>
+      <div class="chart-canvas-wrap"><canvas id="chart-disk"></canvas></div>
+    </div>
+    <div class="chart-box">
+      <div class="chart-title">CPU Temperature °C</div>
+      <div class="chart-canvas-wrap"><canvas id="chart-temp"></canvas></div>
+    </div>
+    <!-- Network -->
+    <div class="chart-box full">
+      <div class="chart-title">Network Throughput (KB/s)</div>
+      <div class="chart-canvas-wrap"><canvas id="chart-net"></canvas></div>
+    </div>
+    <!-- BitsyMiner -->
+    <div class="chart-box">
+      <div class="chart-title">⛏ BitsyMiner Hashrate (kH/s)</div>
+      <div class="chart-canvas-wrap"><canvas id="chart-hashrate"></canvas></div>
+    </div>
+    <div class="chart-box">
+      <div class="chart-title">⛏ BitsyMiner Temperature °C</div>
+      <div class="chart-canvas-wrap"><canvas id="chart-bitsy-temp"></canvas></div>
+    </div>
+    <!-- Bot -->
+    <div class="chart-box">
+      <div class="chart-title">🤖 Bot Daily P&L (USD)</div>
+      <div class="chart-canvas-wrap"><canvas id="chart-pnl"></canvas></div>
+    </div>
+    <div class="chart-box">
+      <div class="chart-title">🤖 BTC Price (USD)</div>
+      <div class="chart-canvas-wrap"><canvas id="chart-btc"></canvas></div>
+    </div>
+  </div>
+</div>
+
+<!-- FOOTER -->
+<div class="footer">
+  <div id="footer-info">---</div>
+  <div><span class="cursor-blink">█</span></div>
+</div>
+
+<!-- TOAST CONTAINER -->
+<div class="toast-container" id="toast-container"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+
+<script>
+// ===== STATE =====
+console.log('JS INICIOU');
+const S = {
+  cpuH: [], tempH: [], netRxH: [], netTxH: [],
+  lastMetrics: null, lastNeofetch: null, lastDocker: null, lastConns: null,
+  lastServices: null, lastHermes: null, lastBot: null
+};
+const _fetchCache = {};
+async function cachedFetch(url, ttlMs=3000) {
+  const entry = _fetchCache[url];
+  if (entry && Date.now() - entry.ts < ttlMs) return entry.data;
+  try {
+    const r = await fetch(url);
+    const d = await r.json();
+    _fetchCache[url] = { data: d, ts: Date.now() };
+    return d;
+  } catch(e) { return entry?.data || null; }
+}
+
+// ===== UTILS =====
+function gauge(pct, len=10) {
+  const n = Math.min(len, Math.round(pct/100*len));
+  return '<span class="on' + (pct>=80?' crit':pct>=60?' warn':'') + '">' + '█'.repeat(n) + '</span>' + '░'.repeat(len-n);
+}
+function sparkline(data, min=0, max=100) {
+  if (!data || !data.length) return '---';
+  const bars = '▁▂▃▄▅▆▇';
+  const range = max-min || 1;
+  return data.map(v => bars[Math.min(bars.length-1, Math.floor((v-min)/range * bars.length))]).join('');
+}
+function colorClass(v, w=60, c=80) { return v>=c?' crit':v>=w?' warn':''; }
+function showToast(msg, type='success') {
+  const c = document.getElementById('toast-container');
+  const t = document.createElement('div');
+  t.className = 'toast ' + type;
+  t.textContent = msg;
+  c.appendChild(t);
+  setTimeout(() => t.remove(), 4200);
+}
+
+// ===== PAGE NAV =====
+function showPage(name, btn) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  if (btn) btn.classList.add('active');
+}
+
+// ===== POLLING =====
+async function fetchMetrics() {
+  try {
+    const d = await cachedFetch('/api/metrics', 3000);
+    if (d) { S.lastMetrics = d; renderMetrics(d); }
+  } catch(e) {}
+}
+async function fetchNeofetch() {
+  try {
+    const d = await cachedFetch('/api/neofetch', 30000);
+    if (d) { S.lastNeofetch = d; renderNeofetch(d); }
+  } catch(e) {}
+}
+async function fetchDocker() {
+  try {
+    const d = await cachedFetch('/api/docker', 10000);
+    if (d) { S.lastDocker = d; renderDocker(d); }
+  } catch(e) {}
+}
+async function fetchConnections() {
+  try {
+    const d = await cachedFetch('/api/connections', 15000);
+    if (d) { S.lastConns = d; renderConnections(d); }
+  } catch(e) {}
+}
+async function fetchServices() {
+  try {
+    const d = await cachedFetch('/api/services', 10000);
+    if (d) { S.lastServices = d; renderServices(d); }
+  } catch(e) {}
+}
+async function fetchHermes() {
+  try {
+    const d = await cachedFetch('/api/hermes', 15000);
+    if (d) { S.lastHermes = d; renderHermes(d); }
+  } catch(e) {}
+}
+async function fetchBot() {
+  console.log('fetchBot iniciado');
+  try {
+    const d = await cachedFetch('/bot-api/state', 4000);
+    console.log('Bot data received:', d ? 'OK' : 'null');
+    if (d) { S.lastBot = d; renderBot(d); }
+  } catch(e) {
+    console.error('fetchBot error:', e);
+  }
+}
+
+// ===== RENDER =====
+function renderMetrics(d) {
+  const cpuPct = d.cpu ? Math.round(d.cpu.percent||0) : 0;
+  document.getElementById('cpu-pct').textContent = cpuPct + '%';
+  document.getElementById('cpu-pct').className = 'metric-val' + colorClass(cpuPct);
+  document.getElementById('cpu-gauge').innerHTML = gauge(cpuPct);
+  if (d.cpu) document.getElementById('cpu-info').textContent = Math.round(d.cpu.freq?.current || d.cpu.freq || 0) + 'MHz · ' + (d.cpu.count_logical || d.cpu.count_physical || '?') + ' cores';
+  S.cpuH.push(cpuPct); if (S.cpuH.length > 60) S.cpuH.shift();
+  document.getElementById('cpu-spark').textContent = sparkline(S.cpuH, 0, 100);
+  const memPct = d.memory ? Math.round(d.memory.percent||0) : 0;
+  document.getElementById('mem-pct').textContent = memPct + '%';
+  document.getElementById('mem-pct').className = 'metric-val' + colorClass(memPct);
+  document.getElementById('mem-gauge').innerHTML = gauge(memPct);
+  if (d.memory) document.getElementById('mem-info').textContent = d.memory.used + ' / ' + d.memory.total;
+  const diskPct = d.disk ? Math.round(d.disk.percent||0) : 0;
+  document.getElementById('disk-pct').textContent = diskPct + '%';
+  document.getElementById('disk-pct').className = 'metric-val' + colorClass(diskPct);
+  document.getElementById('disk-gauge').innerHTML = gauge(diskPct);
+  if (d.disk) document.getElementById('disk-info').textContent = d.disk.used + ' / ' + d.disk.total;
+  const swapPct = d.swap ? Math.round(d.swap.percent||0) : 0;
+  document.getElementById('swap-pct').textContent = swapPct + '%';
+  document.getElementById('swap-gauge').innerHTML = gauge(swapPct);
+  if (d.swap) document.getElementById('swap-info').textContent = d.swap.used + ' / ' + d.swap.total;
+  const temp = d.cpu_temp || 0;
+  S.tempH.push(temp); if (S.tempH.length > 60) S.tempH.shift();
+  document.getElementById('temp-spark').textContent = sparkline(S.tempH, 30, 90);
+  document.getElementById('temp-now').textContent = temp ? temp.toFixed(1) + '°C' : '---';
+  if (d.uptime) document.getElementById('footer-info').textContent = 'Uptime: ' + d.uptime + ' | Load: ' + d.load.map(x=>x.toFixed(2)).join(' ');
+  if (d.network) document.getElementById('footer-info').textContent += ' | RX: ' + d.network.rx_total + ' | TX: ' + d.network.tx_total;
+}
+
+function renderNeofetch(d) {
+  // Dynamic user@host
+  const user = d.user || d.os_id || 'user';
+  const host = d.hostname || d.os_id || 'linux';
+  document.getElementById('nf-user').textContent = user;
+  document.getElementById('nf-host-top').textContent = host;
+  if (d.os) { document.getElementById('nf-os').textContent = d.os; document.getElementById('hostname-top').textContent = d.os_id || host; }
+  if (d.kernel) document.getElementById('nf-kernel').textContent = d.kernel;
+  if (d.host) document.getElementById('nf-host').textContent = d.host;
+  if (d.cpu) document.getElementById('nf-cpu').textContent = d.cpu.length > 45 ? d.cpu.substring(0,45)+'…' : d.cpu;
+  if (d.gpu) document.getElementById('nf-gpu').textContent = d.gpu.length > 45 ? d.gpu.substring(0,45)+'…' : d.gpu;
+  if (d.memory) document.getElementById('nf-mem').textContent = d.memory;
+  if (d.disks) document.getElementById('nf-disk').textContent = d.disks.map(x=>x.mount+' '+x.percent+'%').join(' ');
+  if (d.packages) document.getElementById('nf-pkgs').textContent = d.packages;
+  if (d.ips) document.getElementById('nf-ips').textContent = d.ips.map(x=>x.ip).join(', ');
+  if (d.uptime) document.getElementById('nf-uptime').textContent = d.uptime;
+}
+
+function renderServices(services) {
+  const tbody = document.getElementById('svc-tbody');
+  tbody.innerHTML = '';
+  if (!services || !services.length) { tbody.innerHTML = '<tr><td colspan="6" style="color:var(--text-dim)">No services</td></tr>'; return; }
+  const wl = ['hermes-gateway','binance-bot','server-dashboard'];
+  services.forEach(svc => {
+    const tr = document.createElement('tr');
+    const on = svc.active==='active'||svc.active===true;
+    tr.innerHTML =
+      '<td><span class="svc-dot ' + (on?'on':'off') + '"></span>' + svc.name + '</td>' +
+      '<td style="color:' + (on?'var(--green)':'#555') + '">' + (on?'● RUNNING':'○ STOPPED') + '</td>' +
+      '<td>' + (svc.pid||'—') + '</td>' +
+      '<td>' + (svc.memory||'—') + '</td>' +
+      '<td>' + (svc.cpu||'—') + '</td>' +
+      '<td>' + (wl.includes(svc.name)
+        ? '<button class="restart-btn" data-name="' + svc.name + '" onclick="restartService(this)">↻</button>'
+        : '<span style="color:var(--text-dim)">—</span>') + '</td>';
+    tbody.appendChild(tr);
+  });
+}
+
+async function restartService(btn) {
+  const name = btn.getAttribute('data-name');
+  btn.classList.add('spinning'); btn.disabled = true;
+  try {
+    const r = await fetch('/api/service/' + name + '/restart', {method:'POST'});
+    const d = await r.json();
+    showToast(d.success ? name + ' restarted' : 'Failed: ' + name, d.success?'success':'error');
+    setTimeout(fetchServices, 3000);
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+  setTimeout(() => { btn.classList.remove('spinning'); btn.disabled = false; }, 5000);
+}
+
+function renderHermes(d) {
+  document.getElementById('h-model').textContent = d.model || '---';
+  document.getElementById('h-provider').textContent = d.provider || '---';
+  document.getElementById('h-api-mode').textContent = d.api_mode || '---';
+  document.getElementById('h-approvals').textContent = d.approvals || '---';
+  const gwOn = d.gateway_running;
+  document.getElementById('h-gw-status').textContent = gwOn ? '● RUNNING' : '○ STOPPED';
+  document.getElementById('h-gw-status').style.color = gwOn ? 'var(--green)' : '#555';
+  document.getElementById('h-port').textContent = d.port || '---';
+  document.getElementById('hermes-dot').className = 'hdr-dot' + (gwOn?'':' off');
+  // Platforms
+  const pl = document.getElementById('platforms-list');
+  if (d.platforms) {
+    pl.innerHTML = Object.entries(d.platforms).map(([k,v]) =>
+      '<div class="plat-item"><span class="plat-name">' + k + '</span><span class="plat-status ' + (v?'on':'off') + '">' + (v?'● ON':'○ OFF') + '</span></div>'
+    ).join('');
+  }
+  // Cron
+  const cl = document.getElementById('cron-list');
+  if (d.cron_jobs && d.cron_jobs.length) {
+    cl.innerHTML = d.cron_jobs.map(j => {
+      const icon = j.enabled ? (j.last_status==='error'||j.last_status==='error'?'err':'ok') : 'dis';
+      const iconChar = icon==='ok'?'✓':icon==='err'?'✗':'⏸';
+      return '<div class="cron-item"><span class="cron-icon ' + icon + '">' + iconChar + '</span>'
+        + '<span class="cron-name">' + (j.name||j.id) + '</span>'
+        + '<span class="cron-sched">' + (j.schedule||'—') + '</span>'
+        + '<span class="cron-meta">Last: ' + (j.last_run||'—') + ' | Status: ' + (j.last_status||'—') + ' | Runs: ' + ((j.repeat||{}).completed ?? '—') + '</span>'
+        + '</div>'
+        + (j.last_error ? '<div class="cron-error">⚠ ' + j.last_error.substring(0,80) + '</div>' : '');
+    }).join('');
+  }
+  // Sessions
+  const sl = document.getElementById('sessions-list');
+  if (d.active_sessions && d.active_sessions.length) {
+    sl.innerHTML = d.active_sessions.slice(0,5).map(s => {
+      const date = new Date(s.started);
+      return '<div class="sess-item"><div class="sess-top"><span class="sess-title">' + (s.title||s.id) + '</span>'
+        + '<span class="sess-msgs">' + (s.messages||0) + ' msgs</span></div>'
+        + '<span class="sess-time">' + date.toLocaleTimeString('en-US') + '</span></div>';
+    }).join('');
+  }
+  // Control page skills
+  const sk = document.getElementById('ctrl-skills');
+  if (d.cron_jobs) sk.textContent = 'Cron jobs: ' + d.cron_jobs.length + ' | Model: ' + (d.model||'—');
+  // Control page sessions
+  const cs = document.getElementById('ctrl-sessions');
+  if (d.active_sessions) cs.innerHTML = d.active_sessions.slice(0,5).map(s =>
+    '<div style="padding:2px 0; font-size:10px;"><span style="color:var(--gold);">' + (s.title||s.id) + '</span> — ' + (s.messages||0) + ' msgs</div>'
+  ).join('');
+}
+
+function renderConnections(conns) {
+  const grid = document.getElementById('conn-grid');
+  if (!conns) { grid.innerHTML = '<div style="color:var(--text-dim)">No data</div>'; return; }
+  const order = ['internet','dns','cloudflare','hermes_gateway','binance_bot','dashboard'];
+  grid.innerHTML = order.map(k => {
+    const c = conns[k]; if (!c) return '';
+    const ok = c.reachable !== false;
+    return '<div class="conn-item ' + (ok?'ok':'fail') + '"><div class="conn-label">' + k.replace(/_/g,' ').toUpperCase() + '</div>'
+      + '<div class="conn-val ' + (ok?'ok':'fail') + '">' + (ok?'● UP':'○ DOWN') + '</div>'
+      + (c.latency_ms ? '<div class="conn-lat">' + c.latency_ms.toFixed(0) + 'ms</div>' : '') + '</div>';
+  }).join('');
+  const anyDown = order.some(k => conns[k] && !conns[k].reachable);
+  document.getElementById('conn-dot').className = 'hdr-dot' + (anyDown?' off':'');
+}
+
+function renderDocker(containers) {
+  const grid = document.getElementById('docker-grid');
+  if (!containers || !containers.length) { grid.innerHTML = '<div class="docker-empty">No containers</div>'; return; }
+  grid.innerHTML = containers.map(c => {
+    const running = c.state==='running';
+    return '<div class="docker-item ' + (running?'':'stopped') + '"><div class="docker-name">' + c.name + '</div>'
+      + '<div class="docker-state ' + (running?'':'stopped') + '">' + c.status + '</div>'
+      + (c.ports ? '<div class="docker-ports">' + c.ports + '</div>' : '') + '</div>';
+  }).join('');
+}
+
+function renderBot(d) {
+  const mode = d.paper_mode ? 'PAPER' : 'LIVE';
+  const dotClass = d.paper_mode ? 'paper' : (d.open_position ? 'live' : 'stopped');
+  document.getElementById('bot-status-dot').className = 'bot-status-dot ' + dotClass;
+  document.getElementById('bot-mode').textContent = mode + (d.paper_mode ? ' 📄' : ' 🔴');
+  // Regime
+  const regimeEl = document.getElementById('bot-regime');
+  regimeEl.textContent = d.regime || '---';
+  regimeEl.className = 'bot-regime ' + (d.regime||'').toLowerCase();
+  // Position
+  const posEl = document.getElementById('bot-pos');
+  if (d.open_position && d.open_position.side) {
+    posEl.textContent = d.open_position.side.toUpperCase() + ' @ ' + (d.open_position.entry_price||'—');
+    posEl.className = 'bot-val ' + (d.open_position.side==='long'?'green':'red');
+  } else {
+    posEl.textContent = 'None';
+    posEl.className = 'bot-val';
+  }
+  // P&L
+  const pnlEl = document.getElementById('bot-pnl');
+  const pnl = d.daily_pnl || 0;
+  pnlEl.textContent = (pnl>=0?'+':'') + pnl.toFixed(2) + ' USD';
+  pnlEl.className = 'bot-val ' + (pnl>=0?'green':'red');
+  // Losses
+  document.getElementById('bot-losses').textContent = (d.consecutive_losses||0) + ' / 3';
+  document.getElementById('bot-equity').textContent = d.min_operational_quote ? '$' + d.min_operational_quote : '---';
+  // Analysis
+  if (d.last_analysis && d.indicators) {
+    const a = d.last_analysis;
+    const ind = d.indicators;
+    // Trends (se existirem no indicators)
+    document.getElementById('bot-trend1h').textContent = ind.trend_1h || a.trend_1h || '---';
+    document.getElementById('bot-trend15m').textContent = ind.trend_15m || a.trend_15m || '---';
+    // RSI
+    const rsiVal = ind.rsi_5m || ind.rsi_14 || a.rsi || null;
+    document.getElementById('bot-rsi').textContent = rsiVal ? rsiVal.toFixed(1) : '---';
+    // ADX
+    const adxVal = ind.adx_15m || ind.adx_1h || a.adx || null;
+    document.getElementById('bot-adx').textContent = adxVal ? adxVal.toFixed(1) : '---';
+    // ATR
+    const atrVal = ind.atr_15m || ind.atr || null;
+    document.getElementById('bot-atr').textContent = atrVal ? atrVal.toFixed(4) : '---';
+    // Price
+    const priceVal = ind.price || null;
+    document.getElementById('bot-price').textContent = priceVal ? '$' + priceVal.toFixed(2) : '---';
+  }
+  // Decisions
+  const decEl = document.getElementById('bot-decisions');
+  if (d.last_decisions && d.last_decisions.length) {
+    decEl.innerHTML = d.last_decisions.slice(-10).reverse().map(dec => {
+      const icon = dec.decision === 'EXECUTADO' ? '✓' : (dec.decision==='REJEITADO'?'✗':'⏸');
+      const cls = dec.decision === 'EXECUTADO' ? 'green' : (dec.decision==='REJEITADO'?'red':'yellow');
+      return '<div class="bot-decision"><span class="bot-val ' + cls + '">' + icon + '</span> <span class="bot-dec-text">' + (dec.decision||'---') + '</span>'
+        + '<div class="bot-dec-reason">' + (dec.reason||'') + '</div></div>';
+    }).join('');
+  } else {
+    decEl.innerHTML = '<div style="color:var(--text-dim); font-size:10px; font-style:italic;">No recent decisions</div>';
+  }
+  document.getElementById('bot-dot').className = 'hdr-dot' + (dotClass==='stopped'?' off':'');
+}
+
+// ===== OPERATIONS PAGE =====
+async function loadModels() {
+  try {
+    const r = await fetch('/api/hermes/models');
+    const d = await r.json();
+    document.getElementById('ops-current-model').textContent = d.current || '---';
+    document.getElementById('ops-current-provider').textContent = d.provider || '---';
+    const sel = document.getElementById('ops-model-select');
+    sel.innerHTML = '';
+    (d.models || []).forEach(m => {
+      const opt = document.createElement('option');
+      opt.value = m; opt.textContent = m;
+      if (m === d.current) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    // set provider dropdown
+    if (d.provider) {
+      const pSel = document.getElementById('ops-provider-select');
+      pSel.value = d.provider;
+    }
+  } catch(e) {
+    document.getElementById('ops-current-model').textContent = 'erro';
+  }
+}
+
+async function switchModel() {
+  const model = document.getElementById('ops-model-select').value;
+  const provider = document.getElementById('ops-provider-select').value;
+  const resultEl = document.getElementById('ops-model-result');
+  resultEl.innerHTML = '<span style="color:var(--yellow)">⏳ Applying ' + model + ' and restarting gateway...</span>';
+  try {
+    const r = await fetch('/api/hermes/model', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({model, provider})
+    });
+    const d = await r.json();
+    if (d.success) {
+      resultEl.innerHTML = '<span style="color:var(--green)">✓ Model → ' + d.model + ' | Gateway restarted</span>';
+      showToast('Model ' + d.model + ' applied!', 'success');
+      setTimeout(loadModels, 3000);
+    } else {
+      resultEl.innerHTML = '<span style="color:var(--red)">✗ Error: ' + (d.error || 'unknown') + '</span>';
+    }
+  } catch(e) {
+    resultEl.innerHTML = '<span style="color:var(--red)">✗ Error: ' + e.message + '</span>';
+  }
+}
+
+async function restartSvc(svc) {
+  const resultEl = document.getElementById('ops-action-result');
+  resultEl.innerHTML = '<span style="color:var(--yellow)">⏳ Restarting ' + svc + '...</span>';
+  try {
+    const r = await fetch('/api/service/' + svc + '/restart', {method:'POST'});
+    const d = await r.json();
+    resultEl.innerHTML = '<span style="color:var(--green)">✓ ' + svc + ' restarted</span>';
+    showToast(svc + ' restarted!', 'success');
+    setTimeout(fetchServices, 3000);
+  } catch(e) {
+    resultEl.innerHTML = '<span style="color:var(--red)">✗ ' + e.message + '</span>';
+  }
+}
+
+async function doBackup() {
+  const resultEl = document.getElementById('ops-action-result');
+  resultEl.innerHTML = '<span style="color:var(--yellow)">⏳ Running backup...</span>';
+  try {
+    const r = await fetch('/api/backup', {method: 'POST'});
+    const d = await r.json();
+    if (d.success) {
+      resultEl.innerHTML = '<span style="color:var(--green)">✓ Backup: ' + d.path + '</span>';
+      showToast('Backup created!', 'success');
+    } else {
+      resultEl.innerHTML = '<span style="color:var(--red)">✗ Backup failed</span>';
+    }
+  } catch(e) {
+    resultEl.innerHTML = '<span style="color:var(--red)">✗ ' + e.message + '</span>';
+  }
+}
+
+async function loadOpsHermes() {
+  try {
+    const r = await cachedFetch('/api/hermes', 15000);
+    if (!r) return;
+    // Agent info (API returns top-level fields)
+    const infoEl = document.getElementById('hermes-info-ops');
+    if (infoEl) {
+      let html = '';
+      if (r.model) html += '<div style="margin-bottom:2px;"><span style="color:var(--gold-dark)">Model:</span> ' + r.model + '</div>';
+      if (r.provider) html += '<div style="margin-bottom:2px;"><span style="color:var(--gold-dark)">Provider:</span> ' + r.provider + '</div>';
+      if (r.api_mode) html += '<div style="margin-bottom:2px;"><span style="color:var(--gold-dark)">API Mode:</span> ' + r.api_mode + '</div>';
+      if (r.uptime) html += '<div style="margin-bottom:2px;"><span style="color:var(--gold-dark)">Uptime:</span> ' + r.uptime + '</div>';
+      if (r.gateway_running !== undefined) html += '<div style="margin-bottom:2px;"><span style="color:var(--gold-dark)">Gateway:</span> ' + (r.gateway_running ? '<span style="color:var(--green)">RUNNING</span>' : '<span style="color:var(--red)">STOPPED</span>') + '</div>';
+      // Platforms
+      if (r.platforms) {
+        const plats = Object.entries(r.platforms).map(([k,v]) => k + ': ' + v).join(' | ');
+        html += '<div style="margin-bottom:2px;"><span style="color:var(--gold-dark)">Platforms:</span> ' + plats + '</div>';
+      }
+      infoEl.innerHTML = html || '<span style="color:var(--text-dim)">No agent info</span>';
+    }
+    // Cron jobs
+    const cronEl = document.getElementById('cron-list-ops');
+    if (cronEl && r.cron_jobs) {
+      if (r.cron_jobs.length === 0) {
+        cronEl.innerHTML = '<span style="color:var(--text-dim)">Nenhum cron job</span>';
+      } else {
+        cronEl.innerHTML = r.cron_jobs.map(j =>
+          '<div style="margin-bottom:2px;"><span style="color:var(--cyan)">' + (j.name||j.id) + '</span> <span style="color:var(--text-dim)">' + (j.schedule||'') + '</span> <span style="color:var(--text-mid)">[' + (j.last_status||'—') + ']</span></div>'
+        ).join('');
+      }
+    }
+    // Sessions
+    const sessEl = document.getElementById('sessions-list-ops');
+    if (sessEl && r.active_sessions) {
+      if (r.active_sessions.length === 0) {
+        sessEl.innerHTML = '<span style="color:var(--text-dim)">No active sessions</span>';
+      } else {
+        sessEl.innerHTML = r.active_sessions.map(s =>
+          '<div style="margin-bottom:2px;"><span style="color:var(--green)">' + (s.id||s).substring(0,12) + '…</span> <span style="color:var(--text-dim)">' + (s.preview||'').substring(0,30) + '</span></div>'
+        ).join('');
+      }
+    }
+    // Skills
+    const skillsEl = document.getElementById('skills-list-ops');
+    if (skillsEl && r.skills) {
+      skillsEl.innerHTML = r.skills.map(s =>
+        '<div style="margin-bottom:1px; color:var(--text-mid);">' + (typeof s === 'string' ? s : s.name || s) + '</div>'
+      ).join('');
+    }
+  } catch(e) {
+    document.getElementById('hermes-info-ops').innerHTML = '<span style="color:var(--red)">Error: ' + e.message + '</span>';
+  }
+}
+
+async function quickAction(action) {
+  if (action === 'stop-bot') {
+    showToast('Stop bot: use Telegram: "parar bot"', 'error');
+    return;
+  }
+  showToast('Action: ' + action, 'success');
+  setTimeout(fetchServices, 3000);
+}
+
+// ===== LOGS =====
+let _currentLogService = 'hermes';
+let _rawLogLines = [];
+let _logAutoInterval = null;
+
+async function loadLogs(service, btn) {
+  if (btn) {
+    document.querySelectorAll('.log-toolbar .ctrl-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  }
+  _currentLogService = service;
+  const con = document.getElementById('log-console');
+  con.classList.add('loading');
+  con.innerHTML = '<div class="log-line dim">Loading ' + service + ' logs...</div>';
+
+  try {
+    const r = await fetch('/api/logs/' + service + '?lines=80');
+    const d = await r.json();
+    if (d.error) {
+      con.innerHTML = '<div class="log-line error">✗ ' + d.error + '</div>';
+      con.classList.remove('loading');
+      return;
+    }
+    _rawLogLines = d.lines || [];
+    renderLogLines(_rawLogLines);
+    document.getElementById('log-count').textContent = _rawLogLines.length + ' lines';
+    document.getElementById('log-stats').innerHTML =
+      '<span>Service: <b>' + service + '</b></span>' +
+      '<span>Total: <b>' + (d.count || _rawLogLines.length) + '</b></span>' +
+      '<span>Fetched: <b>' + _rawLogLines.length + '</b></span>';
+    document.getElementById('logs-dot').className = 'hdr-dot';
+  } catch(e) {
+    con.innerHTML = '<div class="log-line error">✗ Error loading logs: ' + e.message + '</div>';
+    document.getElementById('logs-dot').className = 'hdr-dot off';
+  }
+  con.classList.remove('loading');
+}
+
+function classifyLogLine(line) {
+  const l = line.toLowerCase();
+  if (l.includes('error') || l.includes('critical') || l.includes('fatal') || l.includes('exception') || l.includes('traceback')) return 'error';
+  if (l.includes('warn') || l.includes('warning')) return 'warn';
+  if (l.includes('success') || l.includes('started') || l.includes('connected') || l.includes('✓') || l.includes('ok')) return 'ok';
+  return 'info';
+}
+
+function renderLogLines(lines) {
+  const con = document.getElementById('log-console');
+  const filter = (document.getElementById('log-search')?.value || '').toLowerCase();
+  const filtered = filter ? lines.filter(l => l.toLowerCase().includes(filter)) : lines;
+
+  con.innerHTML = filtered.map(line => {
+    const cls = classifyLogLine(line);
+    // Parse journalctl --output=short-iso format: "2026-05-09T14:20:30-03:00 HOSTNAME ..."
+    const parts = line.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[^\s]+)\s+(\S+)\s+(.*)/);
+    if (parts) {
+      const ts = parts[1].replace(/T/, ' ').replace(/[+-]\d{2}:\d{2}$/, '').substring(0, 19);
+      const host = parts[2];
+      const msg = parts[3].substring(0, 200);
+      return '<div class="log-line ' + cls + '"><span class="log-ts">' + ts + '</span><span class="log-tag ' + cls + '">' + cls.toUpperCase().substring(0,4) + '</span>' + escapeHtml(msg) + '</div>';
+    }
+    return '<div class="log-line ' + cls + '">' + escapeHtml(line.substring(0, 200)) + '</div>';
+  }).join('');
+
+  // Auto-scroll to bottom
+  con.scrollTop = con.scrollHeight;
+}
+
+function filterLogs() {
+  if (_rawLogLines.length) renderLogLines(_rawLogLines);
+}
+
+function escapeHtml(text) {
+  const d = document.createElement('div');
+  d.textContent = text;
+  return d.innerHTML;
+}
+
+// Auto-refresh logs every 10s
+setInterval(() => {
+  if (document.getElementById('page-logs').classList.contains('active') &&
+      document.getElementById('log-auto-refresh')?.checked &&
+      _currentLogService) {
+    loadLogs(_currentLogService);
+  }
+}, 10000);
+
+// Load initial logs
+setTimeout(() => loadLogs('hermes'), 500);
+
+// ===== GRAFICOS =====
+let _chartDuration = 3600;
+let _chartInstances = {};
+const _chartColors = {
+  green: '#00ff88', gold: '#FFD700', cyan: '#00d4ff', red: '#ff4444',
+  orange: '#ff8800', purple: '#aa66ff', yellow: '#ffcc00', dimGreen: '#008844'
+};
+
+function setChartDuration(seconds, btn) {
+  _chartDuration = seconds;
+  document.querySelectorAll('.chart-controls .ctrl-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  loadGraficos();
+}
+
+function _makeChartOpts(title, color, yUnit) {
+  return {
+    responsive: true, maintainAspectRatio: false,
+    animation: { duration: 400 },
+    plugins: {
+      legend: { display: false },
+      title: { display: false },
+      tooltip: {
+        backgroundColor: 'rgba(10,10,22,0.95)', titleColor: '#FFD700',
+        bodyColor: '#e8e4d8', borderColor: '#FFD700', borderWidth: 1,
+        titleFont: { family: 'Fira Code', size: 10 },
+        bodyFont: { family: 'Fira Code', size: 10 },
+        callbacks: { label: ctx => `${ctx.parsed.y.toFixed(2)} ${yUnit || ''}` }
+      }
+    },
+    scales: {
+      x: {
+        type: 'time',
+        time: { tooltipFormat: 'HH:mm:ss', displayFormats: { minute: 'HH:mm', hour: 'HH:mm', day: 'dd/MM' } },
+        ticks: { color: '#5a5666', font: { family: 'Fira Code', size: 8 }, maxTicksLimit: 8 },
+        grid: { color: 'rgba(255,255,255,0.03)' },
+        border: { color: '#181828' }
+      },
+      y: {
+        ticks: { color: '#5a5666', font: { family: 'Fira Code', size: 8 }, maxTicksLimit: 5 },
+        grid: { color: 'rgba(255,255,255,0.03)' },
+        border: { color: '#181828' },
+        beginAtZero: title.includes('P&L') ? false : true
+      }
+    },
+    elements: {
+      point: { radius: 0, hoverRadius: 3 },
+      line: { tension: 0.3, borderWidth: 1.5 }
+    }
+  };
+}
+
+function _renderChart(canvasId, data, color, yUnit, fillColor) {
+  const ctx = document.getElementById(canvasId);
+  if (!ctx) return;
+  const opts = _makeChartOpts(canvasId, color, yUnit);
+
+  if (_chartInstances[canvasId]) {
+    _chartInstances[canvasId].data.datasets[0].data = data;
+    _chartInstances[canvasId].options.scales.x.time.displayFormats = opts.scales.x.time.displayFormats;
+    _chartInstances[canvasId].update('none');
+    return;
+  }
+
+  _chartInstances[canvasId] = new Chart(ctx, {
+    type: 'line',
+    data: {
+      datasets: [{
+        data: data,
+        borderColor: color,
+        backgroundColor: fillColor || color + '18',
+        fill: true,
+        pointBackgroundColor: color
+      }]
+    },
+    options: opts
+  });
+}
+
+function _renderMultiChart(canvasId, datasets) {
+  const ctx = document.getElementById(canvasId);
+  if (!ctx) return;
+  const opts = _makeChartOpts(canvasId, '', '');
+  opts.plugins.legend = { display: true, labels: { color: '#8a8494', font: { family: 'Fira Code', size: 8 } } };
+
+  if (_chartInstances[canvasId]) {
+    datasets.forEach((ds, i) => {
+      if (_chartInstances[canvasId].data.datasets[i]) {
+        _chartInstances[canvasId].data.datasets[i].data = ds.data;
+      }
+    });
+    _chartInstances[canvasId].update('none');
+    return;
+  }
+
+  _chartInstances[canvasId] = new Chart(ctx, {
+    type: 'line',
+    data: { datasets: datasets },
+    options: opts
+  });
+}
+
+async function loadGraficos() {
+  try {
+    const r = await fetch('/api/graficos/dashboard?duration=' + _chartDuration);
+    const d = await r.json();
+    if (d.error) {
+      document.getElementById('chart-tsdb-status').textContent = 'TSDB: error - ' + d.error;
+      return;
+    }
+
+    // Status
+    const st = d.status || {};
+    document.getElementById('chart-tsdb-status').textContent =
+      'TSDB: ' + (st.collector_running ? '● ACTIVE' : '○ STOPPED') +
+      ' | ' + (st.points_total || 0).toLocaleString() + ' pts' +
+      ' | ' + (st.db_size_mb || 0) + ' MB';
+
+    // Helper to convert data
+    function toChartPts(arr) {
+      return (arr || []).map(p => ({ x: p[0], y: p[1] }));
+    }
+
+    // System charts
+    _renderChart('chart-cpu', toChartPts(d.system?.cpu), _chartColors.green, '%');
+    _renderChart('chart-mem', toChartPts(d.system?.memory), _chartColors.gold, '%', '#FFD70010');
+    _renderChart('chart-disk', toChartPts(d.system?.disk), _chartColors.orange, '%');
+    _renderChart('chart-temp', toChartPts(d.system?.cpu_temp), _chartColors.red, '°C');
+
+    // Network (multi-line: RX + TX)
+    const netRx = toChartPts(d.system?.net_rx_rate);
+    const netTx = toChartPts(d.system?.net_tx_rate);
+    _renderMultiChart('chart-net', [
+      { label: 'RX', data: netRx, borderColor: _chartColors.cyan, backgroundColor: _chartColors.cyan + '10', fill: true, pointRadius: 0, borderWidth: 1.5, tension: 0.3 },
+      { label: 'TX', data: netTx, borderColor: _chartColors.purple, backgroundColor: _chartColors.purple + '10', fill: true, pointRadius: 0, borderWidth: 1.5, tension: 0.3 }
+    ]);
+
+    // BitsyMiner
+    _renderChart('chart-hashrate', toChartPts(d.bitsy?.hashrate), _chartColors.cyan, 'kH/s');
+    _renderChart('chart-bitsy-temp', toChartPts(d.bitsy?.temp), _chartColors.orange, '°C');
+
+    // Bot
+    _renderChart('chart-pnl', toChartPts(d.bot?.pnl), _chartColors.gold, 'USD');
+    _renderChart('chart-btc', toChartPts(d.bot?.btc_price), _chartColors.green, 'USD');
+
+    // Points info
+    const totalPts = (d.system?.cpu?.length || 0) + (d.bitsy?.hashrate?.length || 0) + (d.bot?.pnl?.length || 0);
+    document.getElementById('chart-points-info').textContent = totalPts + ' pts loaded';
+
+  } catch(e) {
+    document.getElementById('chart-tsdb-status').textContent = 'TSDB: fetch error';
+    console.error('Graficos load error:', e);
+  }
+}
+
+// ===== INIT =====
+fetchMetrics(); fetchNeofetch(); fetchDocker(); fetchConnections(); fetchServices(); fetchHermes(); fetchBot();
+loadModels(); loadOpsHermes();
+loadGraficos();
+loadKanban();
+setInterval(fetchMetrics, 5000);
+setInterval(fetchNeofetch, 30000);
+setInterval(fetchDocker, 15000);
+setInterval(fetchConnections, 20000);
+setInterval(fetchServices, 15000);
+setInterval(fetchHermes, 20000);
+setInterval(fetchBot, 8000);
+setInterval(loadModels, 30000);
+setInterval(loadOpsHermes, 20000);
+setInterval(loadGraficos, 60000);
+setInterval(loadKanban, 15000);
+
+async function loadKanban() {
+  try {
+    const r = await fetch('/api/kanban');
+    const d = await r.json();
+    const el = document.getElementById('kanban-list');
+    const cnt = document.getElementById('kanban-count');
+    const tasks = d.tasks || [];
+    const counts = d.counts || {};
+    const totalActive = (counts.in_progress || 0) + (counts.pending || 0) + (counts.triage || 0);
+    cnt.textContent = totalActive;
+    if (!tasks.length) {
+      el.innerHTML = '<div class="kanban-empty">✓ No active tasks</div>';
+      return;
+    }
+    el.innerHTML = tasks.map(t => {
+      const prio = (t.priority || 0) >= 5 ? 'high' : (t.priority || 0) >= 2 ? 'medium' : 'low';
+      const isTriage = t.status === 'triage';
+      const triageTag = isTriage ? '<span class="badge" style="background:rgba(255,165,0,0.15);color:#ffa500">TRIAGE</span>' : '';
+      const step = t.current_step_key ? `<span class="badge">${t.current_step_key}</span>` : '';
+      const skills = t.skills ? `<span class="badge">${t.skills.split(',')[0].trim()}</span>` : '';
+      const started = t.started_at ? new Date(t.started_at * 1000).toLocaleTimeString('en-US', {hour:'2-digit',minute:'2-digit'}) : '';
+      const body = t.body ? t.body.substring(0, 80) + (t.body.length > 80 ? '…' : '') : '';
+      return `<div class="kanban-item priority-${prio}${isTriage ? ' status-triage' : ''}">
+        <div class="kanban-title">${esc(t.title)}</div>
+        <div class="kanban-meta">${triageTag}${started ? '⏱ ' + started : ''}${step}${skills}</div>
+        ${body ? `<div style="font-size:8px;color:#666;line-height:1.3;margin-top:1px">${esc(body)}</div>` : ''}
+      </div>`;
+    }).join('');
+  } catch(e) { console.error('Kanban error:', e); }
+}
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+</script>
+</body>
+</html>

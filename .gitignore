@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Database (created at runtime)
+metrics.db
+metrics.db-shm
+metrics.db-wal
+
+# Backup files
+*.bak*
+*.dead
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local config (user-specific)
+config.yaml
+.env
+
+# Logs
+*.log
+
+# Dev artifacts
+visual-plan.html

@@ -1,0 +1,16 @@
+[Unit]
+Description=Hermes Server Dashboard
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=__INSTALL_DIR__
+ExecStart=__INSTALL_DIR__/.venv/bin/python3 __INSTALL_DIR__/server.py
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+# Set SUDO_PASSWORD if you need sudo for system service restart
+# Environment=SUDO_PASSWORD=your_password_here
+
+[Install]
+WantedBy=default.target
