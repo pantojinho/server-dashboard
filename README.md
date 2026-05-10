@@ -1,8 +1,16 @@
 # Hermes Server Dashboard v2
 
+[![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/pantojinho/server-dashboard/pulls)
+
 A retro terminal-style web dashboard for monitoring Linux servers, Hermes Agent instances, and trading bots. Zero dependencies beyond Python — no Node.js build step, no external database.
 
 Built for homelab setups, designed to be cloned, configured, and extended in minutes.
+
+![Hermes Server Dashboard](static/dashboard_homepage.png)
+![Bot Trade Tab](static/dashboard_bot_trade.png)
+![Charts Tab](static/dashboard_charts.png)
 
 ## Features
 
@@ -15,15 +23,11 @@ Built for homelab setups, designed to be cloned, configured, and extended in min
 - **Operations Panel** -- Switch AI models, create config backups, quick actions
 - **Plugin System** -- Extend with custom tabs, API endpoints, and metric collectors
 
-## Screenshots
+## Demo
 
-> **Note:** Screenshots coming soon. The dashboard features a dark retro-terminal aesthetic with:
-> - Phosphor-green on dark-blue-black background
-> - Monospace font (Fira Code) throughout
-> - ASCII art neofetch display
-> - Glowing status indicators
-> - Sparkline mini-charts for live metrics
-> - 5-tab layout: SYSTEM, BOT TRADE, OPERATIONS, LOGS, CHARTS
+See [dashboard_demo.gif](static/dashboard_demo.gif) for a live animation of the dashboard updating in real-time:
+
+![Live Demo](static/dashboard_demo.gif)
 
 ## Requirements
 
@@ -35,8 +39,8 @@ Built for homelab setups, designed to be cloned, configured, and extended in min
 
 ```bash
 # Clone
-git clone https://github.com/pantojinho/hermes-server-dashboard.git
-cd hermes-server-dashboard
+git clone https://github.com/pantojinho/server-dashboard.git
+cd server-dashboard
 
 # Run installer (creates venv, installs deps, sets up systemd service)
 chmod +x install.sh
@@ -188,6 +192,22 @@ static/
 | `/api/plugins/{name}/tab` | GET | Plugin tab content |
 | `/bot-api/*` | GET | Proxy to trading bot API |
 
+## Screenshots
+
+The dashboard features a dark retro-terminal aesthetic with:
+- Phosphor-green on dark-blue-black background
+- Monospace font (Fira Code) throughout
+- ASCII art neofetch display
+- Glowing status indicators
+- Sparkline mini-charts for live metrics
+- 5-tab layout: SYSTEM, BOT TRADE, OPERATIONS, LOGS, CHARTS
+
+![Dashboard Homepage](static/dashboard_homepage.png)
+![Bot Trade Tab](static/dashboard_bot_trade.png)
+![Charts Tab](static/dashboard_charts.png)
+
+See [dashboard_demo.gif](static/dashboard_demo.gif) for a live animation of the dashboard updating in real-time.
+
 ## Theme Customization
 
 The dashboard uses CSS custom properties for theming. Override in a custom `<style>` or modify `index.html`:
@@ -208,6 +228,10 @@ The dashboard uses CSS custom properties for theming. Override in a custom `<sty
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on code style, plugins, and PRs.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for a complete list of changes.
 
 ## License
 
