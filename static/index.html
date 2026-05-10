@@ -1092,6 +1092,26 @@
       </div>
     </div>
 
+    <!-- ROW 4: NETWORK SCANNER (full width) — moved from Operations tab -->
+    <div class="panel c14">
+      <div class="panel-hdr">
+        <span>📡 NETWORK SCANNER</span>
+        <span style="display:flex; align-items:center; gap:8px;">
+          <button id="btn-scan-now" onclick="forceScan()" style="background:var(--cyan); color:var(--bg); border:none; border-radius:3px; padding:2px 10px; font-size:9px; cursor:pointer; font-weight:600; letter-spacing:0.5px;">⟳ SCAN NOW</button>
+          <span id="scanner-status" class="status-badge status-off" style="font-size:9px;">Scanning...</span>
+        </span>
+      </div>
+      <div class="panel-body">
+        <div id="devices-grid" class="devices-grid">
+          <div class="retro-text retro-dim" style="font-size:10px;">Initializing scanner...</div>
+        </div>
+        <div id="scanner-error" class="retro-text retro-red" style="display:none; font-size:10px;"></div>
+        <div style="margin-top:8px; padding-top:6px; border-top:1px solid var(--border); text-align:center; font-size:9px; color:var(--text-dim);">
+          Auto-refresh: 60s | Refreshed: <span id="last-refresh">--</span>
+        </div>
+      </div>
+    </div>
+
   </div>
 </div>
 
@@ -1186,25 +1206,7 @@
       <div id="ops-action-result" style="padding:6px 10px; font-size:9px;"></div>
     </div>
 
-    <!-- Network Scanner -->
-    <div class="panel c14">
-      <div class="panel-hdr">
-        <span>📡 NETWORK SCANNER</span>
-        <span style="display:flex; align-items:center; gap:8px;">
-          <button id="btn-scan-now" onclick="forceScan()" style="background:var(--cyan); color:var(--bg); border:none; border-radius:3px; padding:2px 10px; font-size:9px; cursor:pointer; font-weight:600; letter-spacing:0.5px;">⟳ SCAN NOW</button>
-          <span id="scanner-status" class="status-badge status-off" style="font-size:9px;">Scanning...</span>
-        </span>
-      </div>
-      <div class="panel-body">
-        <div id="devices-grid" class="devices-grid">
-          <div class="retro-text retro-dim" style="font-size:10px;">Initializing scanner...</div>
-        </div>
-        <div id="scanner-error" class="retro-text retro-red" style="display:none; font-size:10px;"></div>
-        <div style="margin-top:8px; padding-top:6px; border-top:1px solid var(--border); text-align:center; font-size:9px; color:var(--text-dim);">
-          Auto-refresh: 60s | Refreshed: <span id="last-refresh">--</span>
-        </div>
-      </div>
-    </div>
+    <!-- Network Scanner — moved to System tab (ROW 4) -->
 
     <!-- Hermes Agent Info -->
     <div class="panel c14">
