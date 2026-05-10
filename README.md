@@ -114,16 +114,21 @@ Edit `config.yaml` (created from `config.example.yaml`):
 - `metrics.retention_days` | `35` | Days of TSDB data to keep
 - `integrations.bot_api_url` | — | Trading bot API URL (empty = hidden)
 - `integrations.bitsy_url` | — | BitsyMiner ESP32 API URL (empty = hidden)
+- `hermes.home` | `~/.hermes` | Hermes config/state directory
 - `hermes.gateway_service` | `hermes-gateway.service` | Gateway systemd service name
+- `hermes.gateway_scope` | `user` | Gateway service scope (`user` or `system`)
 
 ### Environment Variables
 
 - **Variable** | **Purpose**
-- `SUDO_PASSWORD` | Password for sudo (if `sudo_mode: sudo_password`)
+- `DASHBOARD_USERNAME` | Basic Auth username (default: `admin`)
 - `DASHBOARD_PASSWORD` | If set, enables Basic Auth on all endpoints
+- `SUDO_PASSWORD` | Password for sudo (if `sudo_mode: sudo_password`)
 - `TELEGRAM_BOT_TOKEN` | For alert notifications
 - `TELEGRAM_CHAT_ID` | For alert notifications
 - `HERMES_HOME` | Path to Hermes config dir (default: `~/.hermes`)
+- `HERMES_GATEWAY_SERVICE` | Override Hermes gateway systemd unit
+- `HERMES_GATEWAY_SCOPE` | Override gateway systemd scope (`user` or `system`)
 
 ### Sudo Modes
 
@@ -196,6 +201,12 @@ static/
   hermes-logo.png      # Logo asset
   favicon.ico          # Browser tab icon
 ```
+
+## Hermes Monitoring
+
+See [docs/HERMES_MONITORING.md](docs/HERMES_MONITORING.md) for the recommended Hermes service configuration, health-check rules, and troubleshooting commands.
+
+For AI agent work, see [AGENTS.md](AGENTS.md).
 
 ## Theme Customization
 

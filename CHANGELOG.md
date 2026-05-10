@@ -5,6 +5,25 @@ All notable changes to the Hermes Server Dashboard project will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Added `AGENTS.md` with repository guidance for AI coding agents.
+- Added `docs/HERMES_MONITORING.md` with Hermes service monitoring setup, API checks, and troubleshooting steps.
+- Added optional Basic Auth enforcement when `DASHBOARD_PASSWORD` or `auth.password` is configured.
+- Added configurable Hermes gateway scope via `hermes.gateway_scope` or `HERMES_GATEWAY_SCOPE`.
+
+### Changed
+- Normalized systemd service names so config values work with or without the `.service` suffix.
+- Hermes gateway checks now respect the configured service scope instead of assuming `systemctl --user`.
+- Optional bot connectivity no longer marks `/api/health` red when `integrations.bot_api_url` is empty.
+- Replaced shell-string systemd/journalctl calls with argument-list subprocess calls where service names or sudo passwords are involved.
+- Added safe fallbacks for `os.getloadavg()` and `os.uname()` so local development on non-Linux hosts does not crash core endpoints.
+
+### Fixed
+- Fixed the missing `Response` import used by the favicon fallback route.
+- Fixed a configuration mismatch by documenting `hermes.home`, `hermes.gateway_service`, and `hermes.gateway_scope` in `config.example.yaml`.
+
 ## [2.0.0] - 2026-05-09
 
 ### Added

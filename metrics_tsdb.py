@@ -101,6 +101,14 @@ def _insert_batch(conn: sqlite3.Connection, rows: list):
 
 RETENTION_DAYS = 35  # keep ~5 weeks of data
 
+
+def _get_loadavg() -> tuple[float, float, float]:
+    try:
+        return os.getloadavg()
+    except (AttributeError, OSError):
+        return (0.0, 0.0, 0.0)
+
+
 def _cleanup(conn: sqlite3.Connection):
     cutoff = time.time() - RETENTION_DAYS * 86400
     conn.execute("DELETE FROM metrics WHERE ts < ?", (cutoff,))
@@ -181,7 +189,7 @@ def collect_system(conn: sqlite3.Connection) -> dict:
             pass
 
     # Load average
-    load1, load5, load15 = os.getloadavg()
+    load1, load5, load15 = _get_loadavg()
     rows.append((now, "system_load_1m", load1, "{}"))
     rows.append((now, "system_load_5m", load5, "{}"))
     rows.append((now, "system_load_15m", load15, "{}"))

@@ -7,6 +7,9 @@ Backend: FastAPI serving system metrics + Hermes status via JSON API.
 import json
 import os
 import re
+import base64
+import platform
+import secrets
 import sqlite3
 import subprocess
 import time
@@ -18,7 +21,7 @@ import psutil
 import uvicorn
 import yaml
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -48,26 +51,81 @@ def _load_config() -> dict:
 
 
 CFG = _load_config()
-HERMES_HOME = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes")))
+_hermes_home_config = CFG.get("hermes", {}).get(
+    "home",
+    CFG.get("hermes_home", str(Path.home() / ".hermes")),
+)
+HERMES_HOME = Path(os.environ.get("HERMES_HOME", _hermes_home_config)).expanduser()
 HISTORY_LEN = CFG.get("metrics", {}).get("history_length", 60)
 
+
+def _normalize_service_name(name: str) -> str:
+    """Return a systemd unit name without duplicating the .service suffix."""
+    unit = str(name or "").strip()
+    if not unit:
+        return unit
+    return unit if unit.endswith(".service") else f"{unit}.service"
+
+
+def _service_key(name: str) -> str:
+    """Return a stable short key for service lookups and API payloads."""
+    unit = _normalize_service_name(name)
+    return unit[:-8] if unit.endswith(".service") else unit
+
+
+def _configured_service_scope(service_name: str, default: str = "system") -> str:
+    """Find a configured service scope by short name or full systemd unit."""
+    wanted_unit = _normalize_service_name(service_name)
+    wanted_key = _service_key(service_name)
+    for svc in CFG.get("services", []):
+        configured_name = svc.get("name", "")
+        configured_unit = _normalize_service_name(configured_name)
+        if configured_unit == wanted_unit or _service_key(configured_name) == wanted_key:
+            return svc.get("scope", default)
+    return default
+
+
+def _run_systemctl_is_active(service_name: str, scope: str, timeout: int = 3) -> subprocess.CompletedProcess:
+    cmd = ["systemctl"]
+    env = None
+    if scope == "user":
+        cmd.append("--user")
+        env = _user_env()
+    cmd.extend(["is-active", _normalize_service_name(service_name)])
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env)
+
 # Hermes gateway service name (configurable for non-standard setups)
-HERMES_GATEWAY_SERVICE = os.environ.get(
+HERMES_GATEWAY_SERVICE = _normalize_service_name(os.environ.get(
     "HERMES_GATEWAY_SERVICE",
-    CFG.get("hermes", {}).get("gateway_service", "hermes-gateway.service"),
+    CFG.get("hermes", {}).get(
+        "gateway_service",
+        CFG.get("gateway_service", "hermes-gateway.service"),
+    ),
+))
+HERMES_GATEWAY_SCOPE = os.environ.get(
+    "HERMES_GATEWAY_SCOPE",
+    CFG.get("hermes", {}).get(
+        "gateway_scope",
+        CFG.get("gateway_scope", _configured_service_scope(HERMES_GATEWAY_SERVICE, "user")),
+    ),
 )
 
 # Sudo configuration — password from env var, NEVER hardcoded
 SUDO_MODE = CFG.get("sudo_mode", "none")
 SUDO_PASSWORD = os.environ.get("SUDO_PASSWORD", "")
 
+# Optional Basic Auth. Disabled unless a password is configured.
+AUTH_CFG = CFG.get("auth", {})
+DASHBOARD_USERNAME = os.environ.get("DASHBOARD_USERNAME", AUTH_CFG.get("username", "admin"))
+DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", AUTH_CFG.get("password", ""))
+
 # Build allowed services from config
 ALLOWED_RESTART_SERVICES = {}
 for svc in CFG.get("services", []):
     if svc.get("allow_restart", False):
-        name = svc["name"]
+        name = _service_key(svc["name"])
         scope = svc.get("scope", "system")
-        ALLOWED_RESTART_SERVICES[name] = (scope, f"{name}.service")
+        ALLOWED_RESTART_SERVICES[name] = (scope, _normalize_service_name(svc["name"]))
 
 
 def _cfg_server(key: str, default: Any = None) -> Any:
@@ -117,6 +175,39 @@ app = FastAPI(
     ],
 )
 
+
+def _auth_required_response() -> Response:
+    return Response(
+        "Authentication required",
+        status_code=401,
+        headers={"WWW-Authenticate": 'Basic realm="Hermes Server Dashboard"'},
+    )
+
+
+@app.middleware("http")
+async def basic_auth_middleware(request: Request, call_next):
+    """Enable Basic Auth when DASHBOARD_PASSWORD or auth.password is configured."""
+    if not DASHBOARD_PASSWORD:
+        return await call_next(request)
+
+    header = request.headers.get("Authorization", "")
+    if not header.startswith("Basic "):
+        return _auth_required_response()
+
+    try:
+        decoded = base64.b64decode(header.removeprefix("Basic ").strip()).decode("utf-8")
+        username, password = decoded.split(":", 1)
+    except Exception:
+        return _auth_required_response()
+
+    user_ok = secrets.compare_digest(username, str(DASHBOARD_USERNAME))
+    pass_ok = secrets.compare_digest(password, str(DASHBOARD_PASSWORD))
+    if not (user_ok and pass_ok):
+        return _auth_required_response()
+
+    return await call_next(request)
+
+
 # CORS from config
 _cors_cfg = CFG.get("cors", {})
 app.add_middleware(
@@ -154,6 +245,21 @@ net_rx_history: list[float] = []
 net_tx_history: list[float] = []
 last_net = psutil.net_io_counters()
 last_net_time = time.time()
+
+
+def _get_loadavg() -> tuple[float, float, float]:
+    try:
+        return os.getloadavg()
+    except (AttributeError, OSError):
+        return (0.0, 0.0, 0.0)
+
+
+def _system_name() -> tuple[str, str, str]:
+    uname = getattr(os, "uname", None)
+    if uname:
+        u = uname()
+        return u.nodename, u.sysname, u.release
+    return platform.node(), platform.system(), platform.release()
 
 
 # ── System metric collectors ──────────────────────────────────────────
@@ -243,7 +349,9 @@ def get_system_metrics() -> dict:
     else:
         uptime_str = f"{minutes}m {seconds}s"
 
-    load1, load5, load15 = os.getloadavg()
+    load1, load5, load15 = _get_loadavg()
+
+    hostname, os_name, os_release = _system_name()
 
     return {
         "cpu": {
@@ -283,8 +391,8 @@ def get_system_metrics() -> dict:
             "rx_total": net.bytes_recv,
             "tx_total": net.bytes_sent,
         },
-        "hostname": os.uname().nodename,
-        "os": f"{os.uname().sysname} {os.uname().release}",
+        "hostname": hostname,
+        "os": f"{os_name} {os_release}",
         "timestamp": datetime.now().isoformat(),
     }
 
@@ -304,10 +412,11 @@ def _get_cpu_model() -> str:
 def get_neofetch() -> dict:
     """Collect neofetch-style system information."""
     info = {}
+    hostname, os_name, os_release = _system_name()
 
     # User and hostname
     info["user"] = os.environ.get("USER", os.environ.get("LOGNAME", "user"))
-    info["hostname"] = os.uname().nodename
+    info["hostname"] = hostname
 
     # OS
     try:
@@ -320,11 +429,11 @@ def get_neofetch() -> dict:
         info["os"] = osr.get("PRETTY_NAME", osr.get("NAME", "Linux"))
         info["os_id"] = osr.get("ID", "linux")
     except Exception:
-        info["os"] = "Linux"
-        info["os_id"] = "linux"
+        info["os"] = os_name
+        info["os_id"] = os_name.lower()
 
     # Kernel
-    info["kernel"] = os.uname().release
+    info["kernel"] = os_release
 
     # Host / Device model
     try:
@@ -486,25 +595,34 @@ def get_connections() -> dict:
 
     # Hermes Gateway (systemd check, no HTTP port)
     try:
-        env = _user_env()
-        result = subprocess.run(
-            ["systemctl", "--user", "is-active", HERMES_GATEWAY_SERVICE],
-            capture_output=True, text=True, timeout=3, env=env
-        )
-        connections["hermes_gateway"] = {"reachable": result.stdout.strip() == "active", "port": "user-svc"}
+        result = _run_systemctl_is_active(HERMES_GATEWAY_SERVICE, HERMES_GATEWAY_SCOPE)
+        connections["hermes_gateway"] = {
+            "reachable": result.stdout.strip() == "active",
+            "scope": HERMES_GATEWAY_SCOPE,
+            "service": HERMES_GATEWAY_SERVICE,
+            "port": f"{HERMES_GATEWAY_SCOPE}-svc",
+        }
     except Exception:
-        connections["hermes_gateway"] = {"reachable": False, "port": "user-svc"}
+        connections["hermes_gateway"] = {
+            "reachable": False,
+            "scope": HERMES_GATEWAY_SCOPE,
+            "service": HERMES_GATEWAY_SERVICE,
+            "port": f"{HERMES_GATEWAY_SCOPE}-svc",
+        }
 
     # Binance Bot
-    bot_api_url = CFG.get("integrations", {}).get("bot_api_url", "http://localhost:18790/api")
-    try:
-        result = subprocess.run(
-            ["curl", "-s", "--max-time", "2", bot_api_url + "/state"],
-            capture_output=True, timeout=4
-        )
-        connections["binance_bot"] = {"reachable": result.returncode == 0, "url": bot_api_url}
-    except Exception:
-        connections["binance_bot"] = {"reachable": False, "url": bot_api_url}
+    bot_api_url = (CFG.get("integrations", {}).get("bot_api_url") or "").rstrip("/")
+    if not bot_api_url:
+        connections["binance_bot"] = {"enabled": False, "reachable": None, "url": ""}
+    else:
+        try:
+            result = subprocess.run(
+                ["curl", "-s", "--max-time", "2", bot_api_url + "/state"],
+                capture_output=True, timeout=4
+            )
+            connections["binance_bot"] = {"enabled": True, "reachable": result.returncode == 0, "url": bot_api_url}
+        except Exception:
+            connections["binance_bot"] = {"enabled": True, "reachable": False, "url": bot_api_url}
 
     # Dashboard (self)
     connections["dashboard"] = {"reachable": True, "port": SERVER_PORT}
@@ -524,8 +642,8 @@ def get_services() -> list[dict]:
         ]
 
     for svc in cfg_services:
-        name = svc["name"]
-        svc_name = f"{name}.service" if not name.endswith(".service") else name
+        name = _service_key(svc["name"])
+        svc_name = _normalize_service_name(svc["name"])
         scope = svc.get("scope", "system")
         display = svc.get("display_name", name)
         allow_restart = svc.get("allow_restart", False)
@@ -650,6 +768,8 @@ def get_hermes_status() -> dict:
     """Get Hermes agent status info."""
     status = {
         "gateway_running": False,
+        "gateway_service": HERMES_GATEWAY_SERVICE,
+        "gateway_scope": HERMES_GATEWAY_SCOPE,
         "model": "unknown",
         "platforms": {},
         "cron_jobs": [],
@@ -658,11 +778,7 @@ def get_hermes_status() -> dict:
 
     # Check if gateway is running
     try:
-        env = _user_env()
-        result = subprocess.run(
-            ["systemctl", "--user", "is-active", HERMES_GATEWAY_SERVICE],
-            capture_output=True, text=True, timeout=3, env=env
-        )
+        result = _run_systemctl_is_active(HERMES_GATEWAY_SERVICE, HERMES_GATEWAY_SCOPE)
         status["gateway_running"] = result.stdout.strip() == "active"
     except Exception:
         try:
@@ -699,21 +815,8 @@ def get_hermes_status() -> dict:
 
     # Check platforms
     platforms = {}
-    try:
-        env = _user_env()
-        result = subprocess.run(
-            ["systemctl", "--user", "is-active", HERMES_GATEWAY_SERVICE],
-            capture_output=True, text=True, timeout=3, env=env
-        )
-        if result.stdout.strip() == "active":
-            platforms["telegram"] = "connected"
-    except Exception:
-        try:
-            result = subprocess.run(["pgrep", "-f", "hermes.*gateway"], capture_output=True, text=True, timeout=3)
-            if result.stdout.strip():
-                platforms["telegram"] = "connected"
-        except Exception:
-            pass
+    if status["gateway_running"]:
+        platforms["telegram"] = "connected"
 
     # Check .env for platform indicators
     env_path = HERMES_HOME / ".env"
@@ -832,8 +935,11 @@ def _sparkline(data: list[float]) -> str:
 
 def _user_env() -> dict:
     """Get env with user D-Bus context for systemctl --user."""
-    uid = str(os.getuid())
     env = os.environ.copy()
+    getuid = getattr(os, "getuid", None)
+    if getuid is None:
+        return env
+    uid = str(getuid())
     runtime_dir = f"/run/user/{uid}"
     env["XDG_RUNTIME_DIR"] = runtime_dir
     env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path={runtime_dir}/bus"
@@ -1101,7 +1207,7 @@ async def system_metrics():
 )
 async def get_features():
     integrations = CFG.get("integrations", {})
-    services = [s["name"] for s in CFG.get("services", [])]
+    services = [_service_key(s["name"]) for s in CFG.get("services", [])]
     return {
         "has_bot": bool(integrations.get("bot_api_url")),
         "has_bitsy": bool(integrations.get("bitsy_url")),
@@ -1171,9 +1277,9 @@ def _build_service_log_lookup():
     """Build service key → (scope, full_service_name) map from config."""
     lookup = {}
     for svc in CFG.get("services", []):
-        name = svc["name"]
+        name = _service_key(svc["name"])
         scope = svc.get("scope", "system")
-        svc_name = f"{name}.service" if not name.endswith(".service") else name
+        svc_name = _normalize_service_name(svc["name"])
         # Allow lookup by short name (without .service)
         lookup[name] = (scope, svc_name)
         # Also allow with .service suffix
@@ -1219,9 +1325,8 @@ async def service_logs(service_key: str, lines: int = 20):
         if scope == "user":
             env = _user_env()
             # Use JSON output to filter by unit
-            cmd = f"journalctl --user --no-pager -n {min(lines * 5, 500)} --output=json"
             result = subprocess.run(
-                ["bash", "-c", cmd],
+                ["journalctl", "--user", "--no-pager", "-n", str(min(lines * 5, 500)), "--output=json"],
                 capture_output=True, text=True, timeout=8, env=env
             )
             filtered = []
@@ -1254,20 +1359,20 @@ async def service_logs(service_key: str, lines: int = 20):
 
         else:
             # System service
-            cmd = f"journalctl -u {svc_name} --no-pager -n {lines} --output=short-iso"
+            cmd = ["journalctl", "-u", svc_name, "--no-pager", "-n", str(lines), "--output=short-iso"]
             if SUDO_MODE == "sudo_password" and SUDO_PASSWORD:
                 result = subprocess.run(
-                    ["bash", "-c", f"echo '{SUDO_PASSWORD}' | sudo -S {cmd}"],
-                    capture_output=True, text=True, timeout=8
+                    ["sudo", "-S", *cmd],
+                    input=SUDO_PASSWORD + "\n", capture_output=True, text=True, timeout=8
                 )
             elif SUDO_MODE == "sudo_nopasswd":
                 result = subprocess.run(
-                    ["bash", "-c", f"sudo -n {cmd}"],
+                    ["sudo", "-n", *cmd],
                     capture_output=True, text=True, timeout=8
                 )
             else:
                 result = subprocess.run(
-                    ["bash", "-c", cmd],
+                    cmd,
                     capture_output=True, text=True, timeout=8
                 )
             parsed = []
@@ -1374,8 +1479,8 @@ async def restart_service(name: str):
             )
         elif SUDO_MODE == "sudo_password" and SUDO_PASSWORD:
             result = subprocess.run(
-                ["bash", "-c", f"echo '{SUDO_PASSWORD}' | sudo -S systemctl restart {service_name}"],
-                capture_output=True, text=True, timeout=15
+                ["sudo", "-S", "systemctl", "restart", service_name],
+                input=SUDO_PASSWORD + "\n", capture_output=True, text=True, timeout=15
             )
         elif SUDO_MODE == "sudo_nopasswd":
             result = subprocess.run(
@@ -1544,9 +1649,31 @@ async def set_hermes_model(request: Request):
         with open(config_path, 'w') as f:
             yaml.dump(c, f, default_flow_style=False)
         # Restart gateway to apply
-        env = _user_env()
-        subprocess.run(["systemctl", "--user", "restart", HERMES_GATEWAY_SERVICE.replace(".service", "")],
-                       capture_output=True, timeout=30, env=env)
+        if HERMES_GATEWAY_SCOPE == "user":
+            result = subprocess.run(
+                ["systemctl", "--user", "restart", HERMES_GATEWAY_SERVICE],
+                capture_output=True, text=True, timeout=30, env=_user_env()
+            )
+        elif SUDO_MODE == "sudo_password" and SUDO_PASSWORD:
+            result = subprocess.run(
+                ["sudo", "-S", "systemctl", "restart", HERMES_GATEWAY_SERVICE],
+                input=SUDO_PASSWORD + "\n", capture_output=True, text=True, timeout=30
+            )
+        elif SUDO_MODE == "sudo_nopasswd":
+            result = subprocess.run(
+                ["sudo", "-n", "systemctl", "restart", HERMES_GATEWAY_SERVICE],
+                capture_output=True, text=True, timeout=30
+            )
+        else:
+            result = subprocess.run(
+                ["systemctl", "restart", HERMES_GATEWAY_SERVICE],
+                capture_output=True, text=True, timeout=30
+            )
+        if result.returncode != 0:
+            return JSONResponse({
+                "success": False,
+                "error": result.stderr.strip() or "Model saved, but gateway restart failed",
+            }, status_code=500)
         # Invalidate hermes cache
         if "hermes" in _api_cache:
             del _api_cache["hermes"]
@@ -1640,9 +1767,9 @@ async def backup_config():
 async def get_logs(service: str, lines: int = 80):
     """Fast journalctl log reader for the dashboard."""
     allowed = {
-        "hermes": ("user", HERMES_GATEWAY_SERVICE),
-        "bot": ("system", "binance-bot.service"),
-        "dashboard": ("system", "server-dashboard.service"),
+        "hermes": (HERMES_GATEWAY_SCOPE, HERMES_GATEWAY_SERVICE),
+        "bot": (_configured_service_scope("binance-bot", "system"), "binance-bot.service"),
+        "dashboard": (_configured_service_scope("server-dashboard", "system"), "server-dashboard.service"),
         "watchdog": (None, None),
     }
     if service not in allowed:
@@ -1654,16 +1781,10 @@ async def get_logs(service: str, lines: int = 80):
         if scope == "user":
             env = _user_env()
             # Use JSON output + filter by _SYSTEMD_USER_UNIT for user services
-            cmd = f"journalctl --user --no-pager -n {min(lines*5, 1000)} --output=short-iso"
-            result = subprocess.run(
-                ["bash", "-c", cmd],
-                capture_output=True, text=True, timeout=8, env=env
-            )
             # Filter lines that belong to this service
             # Use JSON to get _SYSTEMD_USER_UNIT, then match
-            cmd_json = f"journalctl --user --no-pager -n {min(lines*5, 1000)} --output=json"
             result_json = subprocess.run(
-                ["bash", "-c", cmd_json],
+                ["journalctl", "--user", "--no-pager", "-n", str(min(lines * 5, 1000)), "--output=json"],
                 capture_output=True, text=True, timeout=8, env=env
             )
             import json as _json
@@ -1694,44 +1815,44 @@ async def get_logs(service: str, lines: int = 80):
             return {"service": service, "lines": filtered[-lines:], "count": len(filtered)}
 
         elif scope == "system":
-            cmd = f"journalctl -u {svc_name} --no-pager -n {lines} --output=short-iso"
+            cmd = ["journalctl", "-u", svc_name, "--no-pager", "-n", str(lines), "--output=short-iso"]
             if SUDO_MODE == "sudo_password" and SUDO_PASSWORD:
                 result = subprocess.run(
-                    ["bash", "-c", f"echo '{SUDO_PASSWORD}' | sudo -S {cmd}"],
-                    capture_output=True, text=True, timeout=8
+                    ["sudo", "-S", *cmd],
+                    input=SUDO_PASSWORD + "\n", capture_output=True, text=True, timeout=8
                 )
             elif SUDO_MODE == "sudo_nopasswd":
                 result = subprocess.run(
-                    ["bash", "-c", f"sudo -n {cmd}"],
+                    ["sudo", "-n", *cmd],
                     capture_output=True, text=True, timeout=8
                 )
             else:
                 # Try without sudo (user may have access)
                 result = subprocess.run(
-                    ["bash", "-c", cmd],
+                    cmd,
                     capture_output=True, text=True, timeout=8
                 )
             lines_list = [l for l in result.stdout.splitlines() if l.strip()]
             return {"service": service, "lines": lines_list[-lines:], "count": len(lines_list)}
 
         else:  # watchdog
-            cmd = f"journalctl --no-pager -n {lines*5} --output=short-iso | grep -iE 'watchdog' | tail -n {lines}"
+            cmd = ["journalctl", "--no-pager", "-n", str(lines * 5), "--output=short-iso"]
             if SUDO_MODE == "sudo_password" and SUDO_PASSWORD:
                 result = subprocess.run(
-                    ["bash", "-c", f"echo '{SUDO_PASSWORD}' | sudo -S {cmd}"],
-                    capture_output=True, text=True, timeout=8
+                    ["sudo", "-S", *cmd],
+                    input=SUDO_PASSWORD + "\n", capture_output=True, text=True, timeout=8
                 )
             elif SUDO_MODE == "sudo_nopasswd":
                 result = subprocess.run(
-                    ["bash", "-c", f"sudo -n {cmd}"],
+                    ["sudo", "-n", *cmd],
                     capture_output=True, text=True, timeout=8
                 )
             else:
                 result = subprocess.run(
-                    ["bash", "-c", cmd],
+                    cmd,
                     capture_output=True, text=True, timeout=8
                 )
-            lines_list = [l for l in result.stdout.splitlines() if l.strip()]
+            lines_list = [l for l in result.stdout.splitlines() if l.strip() and "watchdog" in l.lower()]
             return {"service": service, "lines": lines_list[-lines:], "count": len(lines_list)}
 
     except Exception as e:
@@ -2145,6 +2266,9 @@ SETTINGS_SCHEMA = [
         "group": "Hermes",
         "icon": "🤖",
         "fields": [
+            {"key": "hermes.home", "label": "Hermes Home", "type": "text", "placeholder": "~/.hermes"},
+            {"key": "hermes.gateway_service", "label": "Gateway Service", "type": "text", "placeholder": "hermes-gateway.service"},
+            {"key": "hermes.gateway_scope", "label": "Gateway Scope", "type": "select", "options": ["user", "system"]},
             {"key": "integrations.telegram.enabled", "label": "Telegram Alerts", "type": "select", "options": ["true", "false"]},
         ],
     },
@@ -2391,7 +2515,7 @@ async def restart_dashboard_service():
         for method in [
             # Method 1: sudo with password (if configured)
             (SUDO_MODE == "sudo_password" and SUDO_PASSWORD,
-             ["bash", "-c", f"echo '{SUDO_PASSWORD}' | sudo -S systemctl restart server-dashboard.service"]),
+             ["sudo", "-S", "systemctl", "restart", "server-dashboard.service"]),
             # Method 2: passwordless sudo
             (True, ["sudo", "-n", "systemctl", "restart", "server-dashboard.service"]),
             # Method 3: direct systemctl (no sudo)
@@ -2400,7 +2524,8 @@ async def restart_dashboard_service():
             should_try, cmd = method
             if not should_try:
                 continue
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+            stdin = SUDO_PASSWORD + "\n" if cmd[:2] == ["sudo", "-S"] else None
+            result = subprocess.run(cmd, input=stdin, capture_output=True, text=True, timeout=15)
             if result.returncode == 0:
                 return {"success": True, "message": "Dashboard restarting..."}
             # If method 2 failed, try next
@@ -2422,7 +2547,8 @@ def get_health_state(system: dict, connections: dict) -> str:
         return "red"
     if connections.get("hermes_gateway", {}).get("reachable", True) is False:
         return "red"
-    if connections.get("binance_bot", {}).get("reachable", True) is False:
+    bot_connection = connections.get("binance_bot", {})
+    if bot_connection.get("enabled", True) and bot_connection.get("reachable", True) is False:
         return "red"
     
     # Check disk critical (>= 95%)

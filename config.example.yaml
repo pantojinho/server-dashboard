@@ -10,6 +10,7 @@ server:
 # ── Authentication ──────────────────────────────────
 # Set DASHBOARD_PASSWORD env var or configure here.
 # If set, all API endpoints require Basic Auth.
+# DASHBOARD_USERNAME env var overrides auth.username when set.
 # auth:
 #   username: "admin"
 #   password: "changeme"  # Better: use env var DASHBOARD_PASSWORD
@@ -68,9 +69,11 @@ integrations:
 
 # ── Hermes Agent Integration ────────────────────────────────────
 # Reads from ~/.hermes/ automatically.
-# Only configure if your Hermes home is in a non-standard location.
-# hermes_home: "~/.hermes"
-# gateway_service: "hermes-gateway.service"  # systemd service name for the gateway
+# Only configure if your Hermes home or gateway unit differs from the defaults.
+hermes:
+  home: "~/.hermes"
+  gateway_service: "hermes-gateway.service"
+  gateway_scope: "user"  # "user" = systemctl --user, "system" = systemctl
 
 # ── CORS ────────────────────────────────────────────
 cors:
