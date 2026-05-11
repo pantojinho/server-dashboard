@@ -12,13 +12,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `docs/HERMES_MONITORING.md` with Hermes service monitoring setup, API checks, and troubleshooting steps.
 - Added optional Basic Auth enforcement when `DASHBOARD_PASSWORD` or `auth.password` is configured.
 - Added configurable Hermes gateway scope via `hermes.gateway_scope` or `HERMES_GATEWAY_SCOPE`.
+- Added comprehensive animation system with smooth page transitions, micro-interactions, and accessibility support.
+  - Page transitions: fade + slide effect (250ms, ease-out, translateY 10px)
+  - Panel hover: subtle glow with scale effect (200ms, ease-out)
+  - Metric counters: animated value transitions (600ms, ease-out) for CPU, Memory, and Uptime
+  - Service status flash: color flash indicator on state changes (800ms, 300ms flash + 500ms fade)
+  - Loading skeleton shimmer: gradient shimmer animation (1.5s infinite, linear)
+  - Scroll reveal: IntersectionObserver-based reveal animations (400ms, ease-out, translateY 20px)
+  - Accessibility: full `prefers-reduced-motion` support with instant transitions (<50ms) when enabled
+  - Performance: GPU-accelerated CSS transforms, no layout property animations, strategic `will-change` usage
 
 ### Changed
-- Normalized systemd service names so config values work with or without the `.service` suffix.
+- Added dedicated mobile breakpoint (`@media (max-width: 640px)`) with single-column grid layout, 10px gaps, and 12px panel padding.
+- Typography scaling on mobile: base font 13px, panel headers 11px, metric values minimum 20px for better readability.
+- Neofetch ASCII art hidden on mobile devices while keeping text information visible.
+- **Service cards on mobile**: stacked layout with status dot/name/scope/badge inline, action buttons in dedicated row, 2-column metadata grid (was 4), and full-width log area.
+- Normalized systemd service names so config values work with or without `.service` suffix.
 - Hermes gateway checks now respect the configured service scope instead of assuming `systemctl --user`.
 - Optional bot connectivity no longer marks `/api/health` red when `integrations.bot_api_url` is empty.
 - Replaced shell-string systemd/journalctl calls with argument-list subprocess calls where service names or sudo passwords are involved.
 - Added safe fallbacks for `os.getloadavg()` and `os.uname()` so local development on non-Linux hosts does not crash core endpoints.
+- **Refined panel hover effects**: reduced glow intensity (0.12 opacity, 12px blur) and added subtle scale (1.01) for smoother interaction.
+- **Updated page transition timing**: reduced from 350ms to 250ms with ease-out for snappier but smooth transitions.
+- **Enhanced panel hover transitions**: reduced from 400ms to 200ms ease-out for more responsive feedback.
 
 ### Fixed
 - Fixed the missing `Response` import used by the favicon fallback route.
