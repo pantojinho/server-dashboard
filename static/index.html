@@ -905,6 +905,34 @@
     .conn-grid { grid-template-columns: 1fr; }
     .neofetch-grid { grid-template-columns: 1fr; }
   }
+
+  /* MOBILE (< 640px) */
+  @media (max-width: 640px) {
+    body { font-size: 13px; }
+    .page { padding: 10px 8px; }
+    .main-grid { grid-template-columns: 1fr; gap: 10px; }
+    .c12, .c14, .c34 { grid-column: 1; }
+    .sys-grid { grid-template-columns: 1fr; grid-template-rows: auto; gap: 8px; }
+    .panel-hdr { font-size: 11px; padding: 6px 10px; min-height: 44px; }
+    .neofetch-grid { grid-template-columns: 1fr; gap: 12px; }
+    .neofetch-ascii { font-size: 5px; line-height: 1.0; }
+    .neofetch-info { font-size: 12px; gap: 8px; }
+    .nf-key { font-size: 10px; min-width: 50px; }
+    .nf-val { font-size: 11px; }
+    .metric-val { font-size: 20px; }
+    .metric-label { font-size: 10px; }
+    .nav-btn { padding: 8px 12px; font-size: 11px; min-height: 36px; min-width: 44px; }
+    .topbar { padding: 8px 10px; }
+    .topbar-brand { font-size: 13px; }
+    .health-badge { padding: 6px 10px; font-size: 10px; min-height: 32px; min-width: 80px; }
+    .conn-grid { grid-template-columns: 1fr; gap: 8px; }
+    .svc-name { font-size: 12px; }
+    .svc-badge { font-size: 10px; padding: 4px 8px; }
+    .restart-btn, .log-toggle-btn { padding: 8px 12px; min-height: 36px; font-size: 11px; }
+    .ctrl-btn { padding: 8px 12px; min-height: 36px; font-size: 11px; }
+    .ctrl-select { min-height: 44px; font-size: 16px; }
+    .ctrl-input { min-height: 44px; font-size: 16px; }
+  }
 </style>
 </head>
 <body>
