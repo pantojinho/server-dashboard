@@ -922,8 +922,14 @@
     .metric-val { font-size: 20px; }
     .metric-label { font-size: 10px; }
     .nav-btn { padding: 8px 12px; font-size: 11px; min-height: 36px; min-width: 44px; }
-    .topbar { padding: 8px 10px; }
+    .topbar { padding: 8px 10px; flex-wrap: wrap; gap: 8px; }
+    .topbar-left { width: 100%; flex-wrap: wrap; justify-content: space-between; }
     .topbar-brand { font-size: 13px; }
+    .topbar-nav { width: 100%; overflow-x: auto; gap: 4px; padding-bottom: 4px; -webkit-overflow-scrolling: touch; }
+    .topbar-nav::-webkit-scrollbar { height: 2px; }
+    .topbar-nav::-webkit-scrollbar-thumb { background: var(--border-dim); border-radius: 2px; }
+    .nav-btn { flex: 0 0 auto; white-space: nowrap; }
+    .topbar-right { display: none; }
     .health-badge { padding: 6px 10px; font-size: 10px; min-height: 32px; min-width: 80px; }
     .conn-grid { grid-template-columns: 1fr; gap: 8px; }
     .svc-name { font-size: 12px; }
